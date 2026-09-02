@@ -7,6 +7,8 @@ export default function DashboardPage() {
   const { user, logout } = useAuth();
   const [groups, setGroups] = useState([]);
   const [newGroupName, setNewGroupName] = useState("");
+  const [memberEmails, setMemberEmails] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetchGroups();
@@ -20,9 +22,28 @@ export default function DashboardPage() {
   async function handleCreateGroup(e) {
     e.preventDefault();
     if (!newGroupName.trim()) return;
-    await api.post("/groups", { name: newGroupName });
-    setNewGroupName("");
-    fetchGroups();
+    setError("");
+
+    // Comma or newline separated list of emails to invite. Only emails
+    // that already belong to a registered user are added (see README).
+    const emails = memberEmails
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    try {
+      const { data } = await api.post("/groups", { name: newGroupName, memberEmails: emails });
+      setNewGroupName("");
+      setMemberEmails("");
+      if (data.unmatchedEmails?.length) {
+        setError(
+          `Group created, but these emails have no account yet so weren't added: ${data.unmatchedEmails.join(", ")}`
+        );
+      }
+      fetchGroups();
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to create group");
+    }
   }
 
   return (
@@ -34,16 +55,25 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      <form onSubmit={handleCreateGroup} className="flex gap-2 mb-6">
+      <form onSubmit={handleCreateGroup} className="mb-6 space-y-2">
+        <div className="flex gap-2">
+          <input
+            className="flex-1 border rounded px-3 py-2"
+            placeholder="New group name"
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+          />
+          <button className="bg-emerald-600 text-white px-4 rounded font-medium hover:bg-emerald-700">
+            Create
+          </button>
+        </div>
         <input
-          className="flex-1 border rounded px-3 py-2"
-          placeholder="New group name"
-          value={newGroupName}
-          onChange={(e) => setNewGroupName(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm"
+          placeholder="Invite by email, comma separated (must already have an account)"
+          value={memberEmails}
+          onChange={(e) => setMemberEmails(e.target.value)}
         />
-        <button className="bg-emerald-600 text-white px-4 rounded font-medium hover:bg-emerald-700">
-          Create
-        </button>
+        {error && <p className="text-sm text-red-600">{error}</p>}
       </form>
 
       <div className="space-y-2">

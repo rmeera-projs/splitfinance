@@ -1,6 +1,7 @@
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
+const { publicUserSelect } = require("../utils/publicUser");
 
 const splitSchema = z.object({
   userId: z.number(),
@@ -45,7 +46,7 @@ async function createExpense(req, res, next) {
           })),
         },
       },
-      include: { splits: true, payer: true },
+      include: { splits: true, payer: { select: publicUserSelect } },
     });
 
     res.status(201).json(expense);
