@@ -209,6 +209,11 @@ export default function GroupPage() {
               <span className="font-medium">{exp.payer.name}</span> paid{" "}
               <span className="font-medium">${Number(exp.amount).toFixed(2)}</span> for{" "}
               {exp.description}
+              {exp.category && (
+                <span className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle">
+                  {exp.category}
+                </span>
+              )}
             </li>
           ))}
         </ul>

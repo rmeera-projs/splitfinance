@@ -2,6 +2,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
+const { categorizeExpense, FALLBACK_CATEGORY } = require("../services/categorizationService");
 
 const splitSchema = z.object({
   userId: z.number(),
@@ -32,12 +33,18 @@ async function createExpense(req, res, next) {
     });
     if (!membership) throw new ApiError(403, "You are not a member of this group");
 
+    // Best-effort auto-categorization; categorizeExpense already falls back
+    // to FALLBACK_CATEGORY internally, but guard here too so a surprise
+    // throw can never block expense creation.
+    const category = await categorizeExpense(data.description).catch(() => FALLBACK_CATEGORY);
+
     const expense = await prisma.expense.create({
       data: {
         groupId: data.groupId,
         paidBy: data.paidBy,
         amount: data.amount,
         description: data.description,
+        category,
         date: data.date ? new Date(data.date) : undefined,
         splits: {
           create: data.splits.map((s) => ({
