@@ -1,4 +1,4 @@
-# SplitFinance — A Splitwise-Style Expense Sharing App
+# SplitFinance - A Splitwise-Style Expense Sharing App
 
 A full-stack expense-splitting application that lets groups of people track shared
 expenses and settle up with the minimum number of payments.
