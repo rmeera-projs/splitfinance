@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int             @id @default(autoincrement())
+  name         String
+  email        String          @unique
+  passwordHash String          @map("password_hash")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  groupsOwned  Group[]         @relation("GroupOwner")
+  memberships  GroupMember[]
+  expensesPaid Expense[]       @relation("ExpensePayer")
+  splits       ExpenseSplit[]
+  settlementsFrom Settlement[] @relation("SettlementFrom")
+  settlementsTo   Settlement[] @relation("SettlementTo")
+
+  @@map("users")
+}
+
+model Group {
+  id        Int           @id @default(autoincrement())
+  name      String
+  createdBy Int           @map("created_by")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  owner     User          @relation("GroupOwner", fields: [createdBy], references: [id])
+  members   GroupMember[]
+  expenses  Expense[]
+  settlements Settlement[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId  Int      @map("group_id")
+  userId   Int      @map("user_id")
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@map("group_members")
+}
+
+model Expense {
+  id          Int            @id @default(autoincrement())
+  groupId     Int            @map("group_id")
+  paidBy      Int            @map("paid_by")
+  amount      Decimal        @db.Decimal(10, 2)
+  description String
+  date        DateTime       @default(now())
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  payer       User           @relation("ExpensePayer", fields: [paidBy], references: [id])
+  splits      ExpenseSplit[]
+
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id         Int     @id @default(autoincrement())
+  expenseId  Int     @map("expense_id")
+  userId     Int     @map("user_id")
+  amountOwed Decimal @map("amount_owed") @db.Decimal(10, 2)
+
+  expense    Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user       User    @relation(fields: [userId], references: [id])
+
+  @@map("expense_splits")
+}
+
+model Settlement {
+  id        Int      @id @default(autoincrement())
+  groupId   Int      @map("group_id")
+  fromUser  Int      @map("from_user")
+  toUser    Int      @map("to_user")
+  amount    Decimal  @db.Decimal(10, 2)
+  date      DateTime @default(now())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  from      User     @relation("SettlementFrom", fields: [fromUser], references: [id])
+  to        User     @relation("SettlementTo", fields: [toUser], references: [id])
+
+  @@map("settlements")
+}
