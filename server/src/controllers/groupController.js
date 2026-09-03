@@ -9,6 +9,10 @@ const createGroupSchema = z.object({
   memberEmails: z.array(z.string().email()).optional().default([]),
 });
 
+const setFinalizedSchema = z.object({
+  finalized: z.boolean(),
+});
+
 async function createGroup(req, res, next) {
   try {
     const { name, memberEmails } = createGroupSchema.parse(req.body);
@@ -83,4 +87,28 @@ async function getGroup(req, res, next) {
   }
 }
 
-module.exports = { createGroup, listMyGroups, getGroup };
+// Finalizing a group blocks new/edited/deleted expenses (see expenseController)
+// while still allowing settlements to be recorded. Any member can finalize
+// or reopen a group - there's no owner-only restriction here.
+async function setFinalized(req, res, next) {
+  try {
+    const groupId = Number(req.params.id);
+    const { finalized } = setFinalizedSchema.parse(req.body);
+
+    const membership = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: req.userId } },
+    });
+    if (!membership) throw new ApiError(403, "You are not a member of this group");
+
+    const group = await prisma.group.update({
+      where: { id: groupId },
+      data: { isFinalized: finalized },
+    });
+
+    res.json(group);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createGroup, listMyGroups, getGroup, setFinalized };

@@ -28,6 +28,18 @@ const updateExpenseSchema = z.object({
   splits: z.array(splitSchema).min(1),
 });
 
+// A finalized group is a closed ledger: no new/edited/deleted expenses, but
+// settlements (see settlementController) are still allowed against it.
+async function assertGroupNotFinalized(groupId) {
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { isFinalized: true },
+  });
+  if (group?.isFinalized) {
+    throw new ApiError(400, "This group is finalized - reopen it to change expenses");
+  }
+}
+
 async function createExpense(req, res, next) {
   try {
     const data = createExpenseSchema.parse(req.body);
@@ -42,6 +54,8 @@ async function createExpense(req, res, next) {
       where: { groupId_userId: { groupId: data.groupId, userId: req.userId } },
     });
     if (!membership) throw new ApiError(403, "You are not a member of this group");
+
+    await assertGroupNotFinalized(data.groupId);
 
     // Best-effort auto-categorization; categorizeExpense already falls back
     // to FALLBACK_CATEGORY internally, but guard here too so a surprise
@@ -90,6 +104,8 @@ async function updateExpense(req, res, next) {
       throw new ApiError(403, "Only the payer can edit this expense");
     }
 
+    await assertGroupNotFinalized(existing.groupId);
+
     // Only re-run categorization when the description actually changed -
     // avoids burning a Cohere call on every edit, and keeps a manually
     // corrected category from getting silently overwritten by unrelated edits.
@@ -133,6 +149,8 @@ async function deleteExpense(req, res, next) {
     if (expense.paidBy !== req.userId) {
       throw new ApiError(403, "Only the payer can delete this expense");
     }
+
+    await assertGroupNotFinalized(expense.groupId);
 
     await prisma.expense.delete({ where: { id: expenseId } });
     res.status(204).send();

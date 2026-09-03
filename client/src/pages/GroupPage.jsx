@@ -170,6 +170,37 @@ export default function GroupPage() {
     }
   }
 
+  // Settlements are always recorded as "the current user paid" - the API
+  // takes fromUser from the auth token, not the request body, so this is
+  // only ever shown for balances where the current user is the one who owes.
+  async function handleSettleUp(balance) {
+    if (!window.confirm(`Record that you paid ${nameFor(balance.to)} $${balance.amount.toFixed(2)}?`)) return;
+    try {
+      await api.post("/settlements", {
+        groupId: Number(id),
+        toUser: balance.to,
+        amount: balance.amount,
+      });
+      fetchGroup();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to record settlement");
+    }
+  }
+
+  async function handleToggleFinalize() {
+    const finalized = !group.isFinalized;
+    const message = finalized
+      ? "Finalize this group? No one will be able to add, edit, or delete expenses until it's reopened."
+      : "Reopen this group so expenses can be added again?";
+    if (!window.confirm(message)) return;
+    try {
+      await api.patch(`/groups/${id}/finalize`, { finalized });
+      fetchGroup();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to update group");
+    }
+  }
+
   function nameFor(userId) {
     return group.members.find((m) => m.user.id === userId)?.user.name || "Unknown";
   }
@@ -181,7 +212,22 @@ export default function GroupPage() {
       <Link to="/" className="text-sm text-emerald-600 hover:underline">
         &larr; Back to groups
       </Link>
-      <h1 className="text-2xl font-bold mt-2 mb-6">{group.name}</h1>
+      <div className="flex items-center justify-between mt-2 mb-6">
+        <h1 className="text-2xl font-bold">
+          {group.name}
+          {group.isFinalized && (
+            <span className="ml-2 inline-block text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full align-middle">
+              Finalized
+            </span>
+          )}
+        </h1>
+        <button
+          onClick={handleToggleFinalize}
+          className="text-sm border px-3 py-1 rounded hover:bg-gray-50"
+        >
+          {group.isFinalized ? "Reopen group" : "Finalize group"}
+        </button>
+      </div>
 
       <section className="mb-8">
         <h2 className="font-semibold mb-2">Balances</h2>
@@ -190,9 +236,19 @@ export default function GroupPage() {
         )}
         <ul className="space-y-1">
           {group.balances.map((b, i) => (
-            <li key={i} className="text-sm bg-white border rounded p-2">
-              <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
-              <span className="font-medium">{nameFor(b.to)}</span> ${b.amount.toFixed(2)}
+            <li key={i} className="text-sm bg-white border rounded p-2 flex items-center justify-between gap-2">
+              <span>
+                <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
+                <span className="font-medium">{nameFor(b.to)}</span> ${b.amount.toFixed(2)}
+              </span>
+              {b.from === user.id && (
+                <button
+                  onClick={() => handleSettleUp(b)}
+                  className="text-xs text-emerald-600 hover:underline shrink-0"
+                >
+                  Settle up
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -200,6 +256,11 @@ export default function GroupPage() {
 
       <section className="mb-8">
         <h2 className="font-semibold mb-2">Add expense</h2>
+        {group.isFinalized ? (
+          <p className="text-sm text-gray-500">
+            This group is finalized. Reopen it to add expenses.
+          </p>
+        ) : (
         <form onSubmit={handleAddExpense} className="space-y-3">
           <div className="flex gap-2">
             <input
@@ -269,6 +330,7 @@ export default function GroupPage() {
             Add expense
           </button>
         </form>
+        )}
       </section>
 
       <section>
@@ -371,7 +433,7 @@ export default function GroupPage() {
                     </span>
                   )}
                 </div>
-                {exp.payer.id === user.id && (
+                {exp.payer.id === user.id && !group.isFinalized && (
                   <div className="flex gap-2 shrink-0 text-xs">
                     <button onClick={() => startEdit(exp)} className="text-emerald-600 hover:underline">
                       Edit

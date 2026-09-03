@@ -5,6 +5,7 @@ const request = require("supertest");
 
 jest.mock("../config/prisma", () => ({
   groupMember: { findUnique: jest.fn() },
+  group: { findUnique: jest.fn() },
   expense: {
     create: jest.fn(),
     findUnique: jest.fn(),
@@ -32,6 +33,10 @@ const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Most tests don't care about group finalization; default to "not
+  // finalized" so only the tests that specifically exercise that behavior
+  // need to override it.
+  prisma.group.findUnique.mockResolvedValue({ isFinalized: false });
 });
 
 describe("POST /api/expenses", () => {
@@ -82,6 +87,16 @@ describe("POST /api/expenses", () => {
   test("rejects an unauthenticated request", async () => {
     const res = await request(app).post("/api/expenses").send(validBody);
     expect(res.status).toBe(401);
+  });
+
+  test("rejects adding an expense to a finalized group", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.group.findUnique.mockResolvedValue({ isFinalized: true });
+
+    const res = await request(app).post("/api/expenses").set(AUTH).send(validBody);
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
   });
 });
 
@@ -161,6 +176,22 @@ describe("PATCH /api/expenses/:id", () => {
     expect(res.status).toBe(400);
     expect(prisma.expense.findUnique).not.toHaveBeenCalled();
   });
+
+  test("rejects editing an expense in a finalized group", async () => {
+    prisma.expense.findUnique.mockResolvedValue({
+      id: 5,
+      groupId: 10,
+      paidBy: USER_ID,
+      description: "Dinner at Chipotle",
+      category: "Food & Drink",
+    });
+    prisma.group.findUnique.mockResolvedValue({ isFinalized: true });
+
+    const res = await request(app).patch("/api/expenses/5").set(AUTH).send(validBody);
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/expenses/:id", () => {
@@ -188,5 +219,15 @@ describe("DELETE /api/expenses/:id", () => {
     const res = await request(app).delete("/api/expenses/999").set(AUTH);
 
     expect(res.status).toBe(404);
+  });
+
+  test("rejects deleting an expense in a finalized group", async () => {
+    prisma.expense.findUnique.mockResolvedValue({ id: 5, groupId: 10, paidBy: USER_ID });
+    prisma.group.findUnique.mockResolvedValue({ isFinalized: true });
+
+    const res = await request(app).delete("/api/expenses/5").set(AUTH);
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.delete).not.toHaveBeenCalled();
   });
 });
