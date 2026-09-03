@@ -83,7 +83,14 @@ export default function DashboardPage() {
             to={`/groups/${group.id}`}
             className="block bg-white border rounded-lg p-4 hover:shadow"
           >
-            <p className="font-medium">{group.name}</p>
+            <p className="font-medium">
+              {group.name}
+              {group.isFinalized && (
+                <span className="ml-2 inline-block text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full align-middle">
+                  Finalized
+                </span>
+              )}
+            </p>
             <p className="text-sm text-gray-500">{group.members.length} members</p>
           </Link>
         ))}
