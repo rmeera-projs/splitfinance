@@ -2,6 +2,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
+const { categorizeExpense, FALLBACK_CATEGORY } = require("../services/categorizationService");
 
 const splitSchema = z.object({
   userId: z.number(),
@@ -10,6 +11,16 @@ const splitSchema = z.object({
 
 const createExpenseSchema = z.object({
   groupId: z.number(),
+  paidBy: z.number(),
+  amount: z.number().positive(),
+  description: z.string().min(1),
+  date: z.string().datetime().optional(),
+  splits: z.array(splitSchema).min(1),
+});
+
+// Same shape as create, minus groupId - an expense can't be moved between
+// groups, only edited in place.
+const updateExpenseSchema = z.object({
   paidBy: z.number(),
   amount: z.number().positive(),
   description: z.string().min(1),
@@ -32,12 +43,18 @@ async function createExpense(req, res, next) {
     });
     if (!membership) throw new ApiError(403, "You are not a member of this group");
 
+    // Best-effort auto-categorization; categorizeExpense already falls back
+    // to FALLBACK_CATEGORY internally, but guard here too so a surprise
+    // throw can never block expense creation.
+    const category = await categorizeExpense(data.description).catch(() => FALLBACK_CATEGORY);
+
     const expense = await prisma.expense.create({
       data: {
         groupId: data.groupId,
         paidBy: data.paidBy,
         amount: data.amount,
         description: data.description,
+        category,
         date: data.date ? new Date(data.date) : undefined,
         splits: {
           create: data.splits.map((s) => ({
@@ -50,6 +67,57 @@ async function createExpense(req, res, next) {
     });
 
     res.status(201).json(expense);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateExpense(req, res, next) {
+  try {
+    const expenseId = Number(req.params.id);
+    const data = updateExpenseSchema.parse(req.body);
+
+    const splitTotal = data.splits.reduce((sum, s) => sum + s.amountOwed, 0);
+    if (Math.abs(splitTotal - data.amount) > 0.01) {
+      throw new ApiError(400, "Split amounts must sum to the total expense amount");
+    }
+
+    const existing = await prisma.expense.findUnique({ where: { id: expenseId } });
+    if (!existing) throw new ApiError(404, "Expense not found");
+
+    // Only the person who logged the payment can edit it (same rule as delete).
+    if (existing.paidBy !== req.userId) {
+      throw new ApiError(403, "Only the payer can edit this expense");
+    }
+
+    // Only re-run categorization when the description actually changed -
+    // avoids burning a Cohere call on every edit, and keeps a manually
+    // corrected category from getting silently overwritten by unrelated edits.
+    const category =
+      data.description === existing.description
+        ? existing.category
+        : await categorizeExpense(data.description).catch(() => FALLBACK_CATEGORY);
+
+    const expense = await prisma.expense.update({
+      where: { id: expenseId },
+      data: {
+        paidBy: data.paidBy,
+        amount: data.amount,
+        description: data.description,
+        category,
+        date: data.date ? new Date(data.date) : undefined,
+        splits: {
+          deleteMany: {},
+          create: data.splits.map((s) => ({
+            userId: s.userId,
+            amountOwed: s.amountOwed,
+          })),
+        },
+      },
+      include: { splits: true, payer: { select: publicUserSelect } },
+    });
+
+    res.json(expense);
   } catch (err) {
     next(err);
   }
@@ -73,4 +141,4 @@ async function deleteExpense(req, res, next) {
   }
 }
 
-module.exports = { createExpense, deleteExpense };
+module.exports = { createExpense, updateExpense, deleteExpense };
