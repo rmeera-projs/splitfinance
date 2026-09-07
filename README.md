@@ -7,10 +7,10 @@ expenses and settle up with the minimum number of payments.
 
 - **Auth** — JWT-based signup/login with hashed passwords
 - **Groups** — create groups, invite members by email
-- **Expenses** — log, edit, or delete expenses (editor-only), split equally, by
-  percentage, or by exact amount
-- **Auto-Categorization** — expenses are automatically tagged with a category
-  (Food & Drink, Groceries, Transportation, etc.) using Cohere's Chat API
+- **Expenses** — log, edit, or delete expenses (editor-only), with 3 ways to split
+  a bill: equally, by percentage, or by exact amount
+- **Auto-Categorization** — expenses are automatically tagged with one of 9 fixed
+  categories using Cohere's Chat API
 - **Balances** — real-time "who owes whom" view per group
 - **Debt Simplification** — a graph-reduction algorithm that collapses a tangled
   web of IOUs into the minimum number of transactions needed to settle a group
@@ -35,10 +35,10 @@ This turns an O(n²) worst-case payment graph into O(n) transactions.
 
 ## 🤖 Auto-Categorization with Cohere
 
-Every expense is automatically tagged with one of a fixed set of categories
-(Food & Drink, Groceries, Transportation, Housing & Utilities, Entertainment,
-Shopping, Travel, Health & Wellness, Other) so spending is queryable by kind
-without any manual tagging. This is implemented in
+Every expense is automatically tagged with one of 9 fixed categories (Food &
+Drink, Groceries, Transportation, Housing & Utilities, Entertainment, Shopping,
+Travel, Health & Wellness, Other) so spending is queryable by kind without any
+manual tagging. This is implemented in
 [`categorizationService.js`](server/src/services/categorizationService.js):
 
 - Uses **Cohere's Chat endpoint** (`command-r7b-12-2024`) rather than the
@@ -65,6 +65,10 @@ splitfinance/
 ├── server/          Node.js + Express + Prisma + PostgreSQL
 └── docker-compose.yml
 ```
+
+### API Surface
+12 REST endpoints across 4 resources (auth, groups, expenses, settlements) -
+see `server/src/routes/`.
 
 ### Tech Stack
 | Layer | Choice |
@@ -132,22 +136,24 @@ root `.env` is git-ignored, same as `server/.env`.
 
 ## 🧪 Testing
 
-Both apps are tested with everything external mocked - no live DB, no live
-Cohere calls, no browser needed.
+56 tests total (36 backend, 20 frontend), with everything external mocked -
+no live DB, no live Cohere calls, no browser needed.
 
 ```bash
-# Backend: Jest + Supertest, run against the real Express app with a
-# mocked Prisma client and a mocked categorizationService
+# Backend: 36 tests (Jest + Supertest), run against the real Express app
+# with a mocked Prisma client and a mocked categorizationService
 cd server
 npm test
 
-# Frontend: Vitest + React Testing Library, with the API client and
-# AuthContext mocked
+# Frontend: 20 tests (Vitest + React Testing Library), with the API
+# client and AuthContext mocked
 cd client
 npm test
 ```
 
 ## 📁 Data Model
+
+6 tables:
 
 ```
 users            (id, name, email, password_hash, created_at)
