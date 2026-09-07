@@ -147,6 +147,17 @@ npm test
 
 # Frontend: 20 tests (Vitest + React Testing Library), with the API
 # client and AuthContext mocked
+Both apps are tested with everything external mocked - no live DB, no live
+Cohere calls, no browser needed.
+
+```bash
+# Backend: Jest + Supertest, run against the real Express app with a
+# mocked Prisma client and a mocked categorizationService
+cd server
+npm test
+
+# Frontend: Vitest + React Testing Library, with the API client and
+# AuthContext mocked
 cd client
 npm test
 ```
