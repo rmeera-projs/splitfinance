@@ -19,6 +19,20 @@ vi.mock("react-router-dom", async (importOriginal) => {
   return { ...actual, useParams: () => ({ id: "7" }) };
 });
 
+// Mirrors the server's fixed list closely enough for these tests - exact
+// values don't matter, only that it's a realistic non-empty list.
+const CATEGORIES = [
+  "Food & Drink",
+  "Groceries",
+  "Transportation",
+  "Housing & Utilities",
+  "Entertainment",
+  "Shopping",
+  "Travel",
+  "Health & Wellness",
+  "Other",
+];
+
 const ME = { id: 1, name: "Alice" };
 const OTHER = { id: 2, name: "Bob" };
 
@@ -42,6 +56,19 @@ function renderGroupPage() {
   );
 }
 
+// Dispatches api.get by URL so /expenses/categories always resolves
+// (fired once on mount) independently of however many times a handler
+// re-fetches /groups/:id afterward (settle up, finalize, edit, delete all
+// trigger a refetch).
+function mockGroupResponse(response) {
+  api.get.mockImplementation((url) => {
+    if (url === "/expenses/categories") {
+      return Promise.resolve({ data: { categories: CATEGORIES } });
+    }
+    return Promise.resolve(response);
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   useAuth.mockReturnValue({ user: ME });
@@ -51,7 +78,7 @@ beforeEach(() => {
 
 describe("GroupPage - rendering", () => {
   test("shows balances, the category badge, and the group name", async () => {
-    api.get.mockResolvedValue({
+    mockGroupResponse({
       data: baseGroup({
         balances: [{ from: OTHER.id, to: ME.id, amount: 10 }],
         expenses: [
@@ -78,7 +105,7 @@ describe("GroupPage - rendering", () => {
   });
 
   test("shows a settled-up message when there are no balances", async () => {
-    api.get.mockResolvedValue({ data: baseGroup() });
+    mockGroupResponse({ data: baseGroup() });
 
     renderGroupPage();
 
@@ -89,7 +116,7 @@ describe("GroupPage - rendering", () => {
 describe("GroupPage - adding an expense", () => {
   test("submits an equal split across all members", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({ data: baseGroup() });
+    mockGroupResponse({ data: baseGroup() });
     api.post.mockResolvedValue({ data: {} });
 
     renderGroupPage();
@@ -114,7 +141,7 @@ describe("GroupPage - adding an expense", () => {
   });
 
   test("hides the add-expense form and shows a message when the group is finalized", async () => {
-    api.get.mockResolvedValue({ data: baseGroup({ isFinalized: true }) });
+    mockGroupResponse({ data: baseGroup({ isFinalized: true }) });
 
     renderGroupPage();
 
@@ -140,7 +167,7 @@ describe("GroupPage - editing and deleting an expense", () => {
   }
 
   test("only shows Edit/Delete on expenses the current user paid for", async () => {
-    api.get.mockResolvedValue({
+    mockGroupResponse({
       data: baseGroup({
         expenses: [
           {
@@ -172,7 +199,7 @@ describe("GroupPage - editing and deleting an expense", () => {
 
   test("edits an expense and sends the updated fields", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({ data: groupWithMyExpense() });
+    mockGroupResponse({ data: groupWithMyExpense() });
     api.patch.mockResolvedValue({ data: {} });
 
     renderGroupPage();
@@ -203,7 +230,7 @@ describe("GroupPage - editing and deleting an expense", () => {
 
   test("deletes an expense after confirming", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({ data: groupWithMyExpense() });
+    mockGroupResponse({ data: groupWithMyExpense() });
     api.delete.mockResolvedValue({});
 
     renderGroupPage();
@@ -216,7 +243,7 @@ describe("GroupPage - editing and deleting an expense", () => {
   });
 
   test("hides Edit/Delete once the group is finalized, even for your own expense", async () => {
-    api.get.mockResolvedValue({ data: { ...groupWithMyExpense(), isFinalized: true } });
+    mockGroupResponse({ data: { ...groupWithMyExpense(), isFinalized: true } });
 
     renderGroupPage();
     await screen.findByText(/Dinner/);
@@ -228,7 +255,7 @@ describe("GroupPage - editing and deleting an expense", () => {
 
 describe("GroupPage - settling up", () => {
   test("shows Settle up only on a balance where the current user is the one who owes", async () => {
-    api.get.mockResolvedValue({
+    mockGroupResponse({
       data: baseGroup({
         balances: [
           { from: ME.id, to: OTHER.id, amount: 10 },
@@ -245,7 +272,7 @@ describe("GroupPage - settling up", () => {
 
   test("records a settlement for the balance the user owes", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({
+    mockGroupResponse({
       data: baseGroup({ balances: [{ from: ME.id, to: OTHER.id, amount: 10 }] }),
     });
     api.post.mockResolvedValue({ data: {} });
@@ -268,7 +295,7 @@ describe("GroupPage - settling up", () => {
 describe("GroupPage - finalize/reopen", () => {
   test("finalizes the group after confirming", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({ data: baseGroup() });
+    mockGroupResponse({ data: baseGroup() });
     api.patch.mockResolvedValue({ data: {} });
 
     renderGroupPage();
@@ -282,11 +309,78 @@ describe("GroupPage - finalize/reopen", () => {
   });
 
   test("shows Reopen group and a Finalized badge once finalized", async () => {
-    api.get.mockResolvedValue({ data: baseGroup({ isFinalized: true }) });
+    mockGroupResponse({ data: baseGroup({ isFinalized: true }) });
 
     renderGroupPage();
 
     expect(await screen.findByText("Reopen group")).toBeInTheDocument();
     expect(screen.getByText("Finalized")).toBeInTheDocument();
+  });
+});
+
+describe("GroupPage - manual category override", () => {
+  function groupWithExpense(payer) {
+    return baseGroup({
+      expenses: [
+        {
+          id: 1,
+          payer,
+          amount: "20",
+          description: "Arcade tokens",
+          category: "Other",
+          splits: [{ userId: payer.id, amountOwed: 20 }],
+        },
+      ],
+    });
+  }
+
+  test("shows an editable category dropdown even for an expense the current user didn't pay for", async () => {
+    mockGroupResponse({ data: groupWithExpense(OTHER) });
+
+    renderGroupPage();
+    await screen.findByText(/Arcade tokens/);
+
+    const select = screen.getByTitle("Change category");
+    expect(select).toHaveValue("Other");
+    expect(within(select).getByRole("option", { name: "Food & Drink" })).toBeInTheDocument();
+  });
+
+  test("changing the dropdown sends the override to the server", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: groupWithExpense(OTHER) });
+    api.patch.mockResolvedValue({ data: {} });
+
+    renderGroupPage();
+    await screen.findByText(/Arcade tokens/);
+
+    await user.selectOptions(screen.getByTitle("Change category"), "Entertainment");
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith("/expenses/1/category", { category: "Entertainment" })
+    );
+  });
+
+  test("falls back to a plain badge if the category list hasn't loaded", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/expenses/categories") {
+        return Promise.resolve({ data: { categories: [] } });
+      }
+      return Promise.resolve({ data: groupWithExpense(ME) });
+    });
+
+    renderGroupPage();
+    await screen.findByText(/Arcade tokens/);
+
+    expect(screen.queryByTitle("Change category")).not.toBeInTheDocument();
+    expect(screen.getByText("Other")).toBeInTheDocument();
+  });
+
+  test("still shows the dropdown even when the group is finalized", async () => {
+    mockGroupResponse({ data: { ...groupWithExpense(OTHER), isFinalized: true } });
+
+    renderGroupPage();
+    await screen.findByText(/Arcade tokens/);
+
+    expect(screen.getByTitle("Change category")).toBeInTheDocument();
   });
 });

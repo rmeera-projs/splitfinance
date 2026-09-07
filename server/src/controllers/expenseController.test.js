@@ -14,10 +14,13 @@ jest.mock("../config/prisma", () => ({
   },
 }));
 
-jest.mock("../services/categorizationService", () => ({
-  categorizeExpense: jest.fn(),
-  FALLBACK_CATEGORY: "Other",
-}));
+jest.mock("../services/categorizationService", () => {
+  // Keep the real CATEGORIES/FALLBACK_CATEGORY (expenseController builds a
+  // zod enum from CATEGORIES at module load time, so it cannot be
+  // undefined) and only mock the network-calling categorizeExpense function.
+  const actual = jest.requireActual("../services/categorizationService");
+  return { ...actual, categorizeExpense: jest.fn() };
+});
 
 const app = require("../app");
 const prisma = require("../config/prisma");
@@ -229,5 +232,89 @@ describe("DELETE /api/expenses/:id", () => {
 
     expect(res.status).toBe(400);
     expect(prisma.expense.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/expenses/:id/category", () => {
+  test("lets any group member override the category, not just the payer", async () => {
+    prisma.expense.findUnique.mockResolvedValue({ id: 5, groupId: 10, paidBy: OTHER_USER_ID, category: "Other" });
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.expense.update.mockResolvedValue({ id: 5, category: "Groceries" });
+
+    const res = await request(app)
+      .patch("/api/expenses/5/category")
+      .set(AUTH)
+      .send({ category: "Groceries" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.category).toBe("Groceries");
+    expect(prisma.expense.update).toHaveBeenCalledWith({
+      where: { id: 5 },
+      data: { category: "Groceries" },
+      include: expect.anything(),
+    });
+  });
+
+  test("rejects a category outside the fixed list", async () => {
+    prisma.expense.findUnique.mockResolvedValue({ id: 5, groupId: 10, paidBy: USER_ID, category: "Other" });
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+
+    const res = await request(app)
+      .patch("/api/expenses/5/category")
+      .set(AUTH)
+      .send({ category: "Made Up Category" });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects a caller who is not a member of the expense's group", async () => {
+    prisma.expense.findUnique.mockResolvedValue({ id: 5, groupId: 10, paidBy: OTHER_USER_ID, category: "Other" });
+    prisma.groupMember.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .patch("/api/expenses/5/category")
+      .set(AUTH)
+      .send({ category: "Groceries" });
+
+    expect(res.status).toBe(403);
+    expect(prisma.expense.update).not.toHaveBeenCalled();
+  });
+
+  test("404s for an expense that doesn't exist", async () => {
+    prisma.expense.findUnique.mockResolvedValue(null);
+
+    const res = await request(app)
+      .patch("/api/expenses/999/category")
+      .set(AUTH)
+      .send({ category: "Groceries" });
+
+    expect(res.status).toBe(404);
+  });
+
+  test("is allowed even when the group is finalized (unlike edit/delete)", async () => {
+    prisma.expense.findUnique.mockResolvedValue({ id: 5, groupId: 10, paidBy: OTHER_USER_ID, category: "Other" });
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.expense.update.mockResolvedValue({ id: 5, category: "Groceries" });
+    // Prove finalized-ness is never even consulted for this endpoint.
+    prisma.group.findUnique.mockResolvedValue({ isFinalized: true });
+
+    const res = await request(app)
+      .patch("/api/expenses/5/category")
+      .set(AUTH)
+      .send({ category: "Groceries" });
+
+    expect(res.status).toBe(200);
+    expect(prisma.group.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/expenses/categories", () => {
+  test("returns the fixed category list", async () => {
+    const res = await request(app).get("/api/expenses/categories").set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.categories).toEqual(expect.arrayContaining(["Food & Drink", "Other"]));
+    expect(res.body.categories.length).toBeGreaterThan(1);
   });
 });
