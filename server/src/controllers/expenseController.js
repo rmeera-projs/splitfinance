@@ -2,7 +2,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
-const { categorizeExpense, FALLBACK_CATEGORY } = require("../services/categorizationService");
+const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../services/categorizationService");
 
 const splitSchema = z.object({
   userId: z.number(),
@@ -26,6 +26,10 @@ const updateExpenseSchema = z.object({
   description: z.string().min(1),
   date: z.string().datetime().optional(),
   splits: z.array(splitSchema).min(1),
+});
+
+const updateCategorySchema = z.object({
+  category: z.enum(CATEGORIES),
 });
 
 // A finalized group is a closed ledger: no new/edited/deleted expenses, but
@@ -139,6 +143,38 @@ async function updateExpense(req, res, next) {
   }
 }
 
+// Lets any group member manually correct a mis-categorized expense - not
+// restricted to the payer (unlike edit/delete), since the category is
+// shared organizational metadata rather than a financial detail only the
+// payer should control. Deliberately skips assertGroupNotFinalized too:
+// finalizing freezes the financial ledger (amounts/splits), but relabeling
+// an expense's category has no financial effect, so there's no reason to
+// require reopening the group just to fix a tag.
+async function updateExpenseCategory(req, res, next) {
+  try {
+    const expenseId = Number(req.params.id);
+    const { category } = updateCategorySchema.parse(req.body);
+
+    const existing = await prisma.expense.findUnique({ where: { id: expenseId } });
+    if (!existing) throw new ApiError(404, "Expense not found");
+
+    const membership = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId: existing.groupId, userId: req.userId } },
+    });
+    if (!membership) throw new ApiError(403, "You are not a member of this group");
+
+    const expense = await prisma.expense.update({
+      where: { id: expenseId },
+      data: { category },
+      include: { splits: true, payer: { select: publicUserSelect } },
+    });
+
+    res.json(expense);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deleteExpense(req, res, next) {
   try {
     const expenseId = Number(req.params.id);
@@ -159,4 +195,8 @@ async function deleteExpense(req, res, next) {
   }
 }
 
-module.exports = { createExpense, updateExpense, deleteExpense };
+async function listCategories(req, res) {
+  res.json({ categories: CATEGORIES });
+}
+
+module.exports = { createExpense, updateExpense, updateExpenseCategory, deleteExpense, listCategories };

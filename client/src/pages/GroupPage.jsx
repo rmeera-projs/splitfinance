@@ -14,6 +14,10 @@ export default function GroupPage() {
   const [splitValues, setSplitValues] = useState({}); // userId -> string (exact $ or %)
   const [expenseError, setExpenseError] = useState("");
 
+  // Fixed category list from the server (see categorizationService),
+  // used to populate the manual-override dropdown on each expense.
+  const [categories, setCategories] = useState([]);
+
   const [editingId, setEditingId] = useState(null);
   const [editDescription, setEditDescription] = useState("");
   const [editAmount, setEditAmount] = useState("");
@@ -24,6 +28,10 @@ export default function GroupPage() {
 
   useEffect(() => {
     fetchGroup();
+    api
+      .get("/expenses/categories")
+      .then(({ data }) => setCategories(data.categories))
+      .catch(() => {});
   }, [id]);
 
   async function fetchGroup() {
@@ -167,6 +175,18 @@ export default function GroupPage() {
       fetchGroup();
     } catch (err) {
       alert(err.response?.data?.error || "Failed to delete expense");
+    }
+  }
+
+  // Any group member can correct a mis-categorized expense (not just the
+  // payer) and it works even on a finalized group, since it's metadata
+  // rather than a financial change - see updateExpenseCategory on the server.
+  async function handleCategoryChange(expenseId, category) {
+    try {
+      await api.patch(`/expenses/${expenseId}/category`, { category });
+      fetchGroup();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to update category");
     }
   }
 
@@ -427,7 +447,21 @@ export default function GroupPage() {
                   <span className="font-medium">{exp.payer.name}</span> paid{" "}
                   <span className="font-medium">${Number(exp.amount).toFixed(2)}</span> for{" "}
                   {exp.description}
-                  {exp.category && (
+                  {exp.category && categories.length > 0 && (
+                    <select
+                      value={exp.category}
+                      onChange={(e) => handleCategoryChange(exp.id, e.target.value)}
+                      title="Change category"
+                      className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle border-0 cursor-pointer"
+                    >
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {exp.category && categories.length === 0 && (
                     <span className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle">
                       {exp.category}
                     </span>
