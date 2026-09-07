@@ -17,6 +17,8 @@ expenses and settle up with the minimum number of payments.
 - **Settlements** — record payments between members, right from the balances view
 - **Finalize / Reopen** — lock a group to stop new expenses once a trip/bill is
   done, without blocking settling up; any member can finalize or reopen
+- **Manual Category Override** — any group member can correct a bad
+  auto-categorization from a dropdown, even on a finalized group
 - **Activity Feed** — chronological log of expenses and settlements per group
 
 ## 🧠 The Interesting Part: Debt Simplification
@@ -72,6 +74,7 @@ splitfinance/
 | Database | PostgreSQL |
 | Auth | JWT + bcrypt |
 | AI | Cohere Chat API (expense auto-categorization) |
+| Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 | Infra | Docker Compose |
 
 ## 🚀 Getting Started
@@ -127,6 +130,23 @@ COHERE_API_KEY="your-key-here"
 `docker-compose.yml` picks it up via `${COHERE_API_KEY}` substitution. This
 root `.env` is git-ignored, same as `server/.env`.
 
+## 🧪 Testing
+
+Both apps are tested with everything external mocked - no live DB, no live
+Cohere calls, no browser needed.
+
+```bash
+# Backend: Jest + Supertest, run against the real Express app with a
+# mocked Prisma client and a mocked categorizationService
+cd server
+npm test
+
+# Frontend: Vitest + React Testing Library, with the API client and
+# AuthContext mocked
+cd client
+npm test
+```
+
 ## 📁 Data Model
 
 ```
@@ -141,8 +161,6 @@ settlements      (id, group_id, from_user, to_user, amount, date, created_at)
 See `server/prisma/schema.prisma` for the full schema.
 
 ## 🗺️ Roadmap
-- [ ] Frontend test coverage (no test framework wired up in `client/` yet)
-- [ ] Manual category override (correct a bad auto-categorization by hand)
 - [ ] Spending insights dashboard (charts by category/time) — the data model
       already supports this now that every expense carries a `category`
 - [ ] WebSocket-based real-time updates
