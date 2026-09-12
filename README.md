@@ -19,6 +19,8 @@ expenses and settle up with the minimum number of payments.
   done, without blocking settling up; any member can finalize or reopen
 - **Manual Category Override** — any group member can correct a bad
   auto-categorization from a dropdown, even on a finalized group
+- **Spending Insights** — category, time (day/week/month), and per-member/
+  per-group breakdowns, both per-group and personally across all your groups
 - **Activity Feed** — chronological log of expenses and settlements per group
 
 ## 🧠 The Interesting Part: Debt Simplification
@@ -57,6 +59,29 @@ manual tagging. This is implemented in
 If `COHERE_API_KEY` isn't set, every expense is simply categorized as `"Other"`
 — the app works fully without it.
 
+## 📊 Spending Insights
+
+Both `GroupPage` (one group's expenses, broken down by member) and the
+dashboard (your own share of spending across every group you're in, broken
+down by group) share one [`InsightsPanel`](client/src/components/InsightsPanel.jsx)
+component and one [aggregation utility](client/src/utils/insights.js):
+
+- All aggregation (by category, by member/group, by time bucket) happens
+  **client-side** from a flat list already fetched for the page - the data
+  volumes involved (one group's or one person's expenses) are small enough
+  that this is simpler than building server-side grouping queries, and it
+  lets the time-bucket toggle switch **instantly with no refetch**
+- The personal dashboard view is backed by one new endpoint,
+  `GET /api/insights`, which flattens the current user's own expense-split
+  shares across every group they belong to
+- Time buckets (day/week/month, user-selectable) are computed against the
+  **UTC calendar date**, not the viewer's local timezone - otherwise the
+  same expense could land in a different day/week bucket depending on
+  where the viewer is
+- Bars are plain CSS (a `<div>` with a percentage width) rather than a
+  charting library - there was no other charting need in the app to justify
+  the dependency
+
 ## 🏗️ Architecture
 
 ```
@@ -67,8 +92,8 @@ splitfinance/
 ```
 
 ### API Surface
-12 REST endpoints across 4 resources (auth, groups, expenses, settlements) -
-see `server/src/routes/`.
+13 REST endpoints across 5 resources (auth, groups, expenses, settlements,
+insights) - see `server/src/routes/`.
 
 ### Tech Stack
 | Layer | Choice |
@@ -136,28 +161,17 @@ root `.env` is git-ignored, same as `server/.env`.
 
 ## 🧪 Testing
 
-56 tests total (36 backend, 20 frontend), with everything external mocked -
+73 tests total (39 backend, 34 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no browser needed.
 
 ```bash
-# Backend: 36 tests (Jest + Supertest), run against the real Express app
+# Backend: 39 tests (Jest + Supertest), run against the real Express app
 # with a mocked Prisma client and a mocked categorizationService
 cd server
 npm test
 
-# Frontend: 20 tests (Vitest + React Testing Library), with the API
+# Frontend: 34 tests (Vitest + React Testing Library), with the API
 # client and AuthContext mocked
-Both apps are tested with everything external mocked - no live DB, no live
-Cohere calls, no browser needed.
-
-```bash
-# Backend: Jest + Supertest, run against the real Express app with a
-# mocked Prisma client and a mocked categorizationService
-cd server
-npm test
-
-# Frontend: Vitest + React Testing Library, with the API client and
-# AuthContext mocked
 cd client
 npm test
 ```
@@ -178,8 +192,6 @@ settlements      (id, group_id, from_user, to_user, amount, date, created_at)
 See `server/prisma/schema.prisma` for the full schema.
 
 ## 🗺️ Roadmap
-- [ ] Spending insights dashboard (charts by category/time) — the data model
-      already supports this now that every expense carries a `category`
 - [ ] WebSocket-based real-time updates
 - [ ] Receipt OCR to auto-fill expense amounts
 - [ ] Recurring expenses (rent, subscriptions)
