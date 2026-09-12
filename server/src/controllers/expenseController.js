@@ -4,6 +4,7 @@ const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../services/categorizationService");
+const { emitGroupActivity } = require("../services/realtimeService");
 
 const splitSchema = z.object({
   userId: z.number(),
@@ -73,6 +74,7 @@ async function createExpense(req, res, next) {
       include: { splits: true, payer: { select: publicUserSelect } },
     });
 
+    emitGroupActivity(data.groupId, { type: "expense-added", actorId: req.userId });
     res.status(201).json(expense);
   } catch (err) {
     next(err);
@@ -126,6 +128,7 @@ async function updateExpense(req, res, next) {
       include: { splits: true, payer: { select: publicUserSelect } },
     });
 
+    emitGroupActivity(existing.groupId, { type: "expense-updated", actorId: req.userId });
     res.json(expense);
   } catch (err) {
     next(err);
@@ -158,6 +161,7 @@ async function updateExpenseCategory(req, res, next) {
       include: { splits: true, payer: { select: publicUserSelect } },
     });
 
+    emitGroupActivity(existing.groupId, { type: "expense-category", actorId: req.userId });
     res.json(expense);
   } catch (err) {
     next(err);
@@ -178,6 +182,7 @@ async function deleteExpense(req, res, next) {
     await assertGroupNotFinalized(expense.groupId);
 
     await prisma.expense.delete({ where: { id: expenseId } });
+    emitGroupActivity(expense.groupId, { type: "expense-deleted", actorId: req.userId });
     res.status(204).send();
   } catch (err) {
     next(err);

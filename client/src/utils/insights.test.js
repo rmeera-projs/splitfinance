@@ -38,6 +38,32 @@ describe("aggregateByDimension", () => {
       { label: "Bob", total: 5 },
     ]);
   });
+
+  test("fills in a zero entry for a known label that has no items", () => {
+    const items = [{ amount: 10, payer: "Alice" }];
+
+    expect(aggregateByDimension(items, (i) => i.payer, ["Alice", "Carol"])).toEqual([
+      { label: "Alice", total: 10 },
+      { label: "Carol", total: 0 },
+    ]);
+  });
+
+  test("doesn't duplicate a known label that already has items", () => {
+    const items = [
+      { amount: 10, payer: "Alice" },
+      { amount: 5, payer: "Bob" },
+    ];
+
+    const result = aggregateByDimension(items, (i) => i.payer, ["Alice", "Bob"]);
+    expect(result).toHaveLength(2);
+  });
+
+  test("with no items at all, every known label still appears at zero", () => {
+    expect(aggregateByDimension([], (i) => i.payer, ["Alice", "Bob"])).toEqual([
+      { label: "Alice", total: 0 },
+      { label: "Bob", total: 0 },
+    ]);
+  });
 });
 
 describe("aggregateByTime", () => {

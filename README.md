@@ -21,8 +21,14 @@ expenses and settle up with the minimum number of payments.
 - **Manual Category Override** — any group member can correct a bad
   auto-categorization from a dropdown, even on a finalized group
 - **Spending Insights** — category, time (day/week/month), and per-member/
-  per-group breakdowns, both per-group and personally across all your groups
+  per-group breakdowns, both per-group and personally across all your groups;
+  every current member appears in the per-member breakdown, even at $0 if
+  they haven't been part of an expense yet
 - **Activity Feed** — chronological log of expenses and settlements per group
+- **Live Updates** — a WebSocket notice tells you when someone else changes a
+  group you're viewing (new/edited/deleted expense, settlement, finalize/
+  reopen, new member), with a one-click refresh rather than an unprompted
+  page change
 
 ## 🧠 The Interesting Part: Debt Simplification
 
@@ -82,6 +88,36 @@ component and one [aggregation utility](client/src/utils/insights.js):
 - Bars are plain CSS (a `<div>` with a percentage width) rather than a
   charting library - there was no other charting need in the app to justify
   the dependency
+- The per-member breakdown always lists every *current* group member, not
+  just the ones with an expense so far - a member added after the fact would
+  otherwise be silently missing until they actually paid for something
+
+## 🔌 Live Updates with WebSockets
+
+Group pages stay current across everyone viewing them via
+[Socket.IO](server/src/services/realtimeService.js), without polling:
+
+- One room per group (`group:<id>`) - a socket only joins after the server
+  confirms the connecting user is actually a member, the same rule the REST
+  API enforces
+- Every mutating endpoint (add/edit/delete an expense, change its category,
+  record a settlement, finalize/reopen, add a member) broadcasts a
+  lightweight `{ type, actorId }` notice to the room after it succeeds - the
+  socket event is a "something changed, you may want to refresh" signal, not
+  the changed data itself, so there's one source of truth (the REST API) for
+  what's actually current
+- The client shows this as a dismissable banner ("Bob added an expense -
+  refresh to see it") rather than silently refetching - an unprompted data
+  swap could yank an in-progress add/edit form out from under whoever's
+  looking at the page
+- A user's own actions never trigger their own banner (the page already has
+  the fresh data from the API response that caused the change)
+- Auth happens in Socket.IO's handshake middleware (same JWT as the REST
+  API) - a bad or missing token rejects the connection before it's ever
+  established, rather than connecting and then disconnecting
+- `initRealtime()` only runs from `index.js`'s real HTTP server, never
+  under Jest/Supertest - `emitGroupActivity` is a safe no-op in every
+  backend test
 
 ## 🏗️ Architecture
 
@@ -103,6 +139,7 @@ insights) - see `server/src/routes/`.
 | Backend | Node.js, Express, Prisma ORM |
 | Database | PostgreSQL |
 | Auth | JWT + bcrypt |
+| Real-time | Socket.IO (live group activity notices) |
 | AI | Cohere Chat API (expense auto-categorization) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 | Infra | Docker Compose |
@@ -177,17 +214,19 @@ down.
 
 ## 🧪 Testing
 
-83 tests total (45 backend, 38 frontend), with everything external mocked -
+100 tests total (50 backend, 50 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no browser needed.
 
 ```bash
-# Backend: 45 tests (Jest + Supertest), run against the real Express app
-# with a mocked Prisma client and a mocked categorizationService
+# Backend: 50 tests (Jest + Supertest), run against the real Express app
+# with a mocked Prisma client and a mocked categorizationService. A handful
+# of these spin up a real (in-process, no external network) Socket.IO
+# server + client to exercise realtimeService's auth and room logic directly.
 cd server
 npm test
 
-# Frontend: 38 tests (Vitest + React Testing Library), with the API
-# client and AuthContext mocked
+# Frontend: 50 tests (Vitest + React Testing Library), with the API
+# client, AuthContext, and the realtime socket mocked
 cd client
 npm test
 ```
@@ -208,7 +247,7 @@ settlements      (id, group_id, from_user, to_user, amount, date, created_at)
 See `server/prisma/schema.prisma` for the full schema.
 
 ## 🗺️ Roadmap
-- [ ] WebSocket-based real-time updates
+- [x] WebSocket-based real-time updates
 - [ ] Receipt OCR to auto-fill expense amounts
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses

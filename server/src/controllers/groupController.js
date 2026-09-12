@@ -4,6 +4,7 @@ const { ApiError } = require("../middleware/errorHandler");
 const { getGroupBalances } = require("../services/balanceService");
 const { publicUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
+const { emitGroupActivity } = require("../services/realtimeService");
 
 const createGroupSchema = z.object({
   name: z.string().min(1),
@@ -98,6 +99,9 @@ async function addMembers(req, res, next) {
       include: { members: { include: { user: { select: publicUserSelect } } } },
     });
 
+    if (toAdd.length > 0) {
+      emitGroupActivity(groupId, { type: "member-added", actorId: req.userId });
+    }
     res.status(200).json({ ...group, unmatchedEmails });
   } catch (err) {
     next(err);
@@ -160,6 +164,7 @@ async function setFinalized(req, res, next) {
       data: { isFinalized: finalized },
     });
 
+    emitGroupActivity(groupId, { type: finalized ? "finalize" : "reopen", actorId: req.userId });
     res.json(group);
   } catch (err) {
     next(err);
