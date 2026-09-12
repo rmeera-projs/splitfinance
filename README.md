@@ -6,7 +6,8 @@ expenses and settle up with the minimum number of payments.
 ## ✨ Features
 
 - **Auth** — JWT-based signup/login with hashed passwords
-- **Groups** — create groups, invite members by email
+- **Groups** — create groups, invite members by email, and add more members
+  to a group after it's already been created
 - **Expenses** — log, edit, or delete expenses (editor-only), with 3 ways to split
   a bill: equally, by percentage, or by exact amount
 - **Auto-Categorization** — expenses are automatically tagged with one of 9 fixed
@@ -92,7 +93,7 @@ splitfinance/
 ```
 
 ### API Surface
-13 REST endpoints across 5 resources (auth, groups, expenses, settlements,
+14 REST endpoints across 5 resources (auth, groups, expenses, settlements,
 insights) - see `server/src/routes/`.
 
 ### Tech Stack
@@ -166,18 +167,26 @@ Dockerfiles). Note that `client/Dockerfile.prod` - not the root
 `client/Dockerfile`, which runs Vite's dev server - is what production
 deploys should build.
 
+Prefer to run it on your own AWS account instead? [`terraform/`](terraform/)
+provisions a single free-tier-eligible EC2 instance that boots, installs
+Docker, clones this repo, and runs `docker compose up --build` - no Railway
+account needed. See the comments in `terraform/main.tf` and
+`terraform/variables.tf` to get started (`terraform init`, `terraform plan
+-out=tfplan`, `terraform apply "tfplan"`); `terraform destroy` tears it back
+down.
+
 ## 🧪 Testing
 
-73 tests total (39 backend, 34 frontend), with everything external mocked -
+83 tests total (45 backend, 38 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no browser needed.
 
 ```bash
-# Backend: 39 tests (Jest + Supertest), run against the real Express app
+# Backend: 45 tests (Jest + Supertest), run against the real Express app
 # with a mocked Prisma client and a mocked categorizationService
 cd server
 npm test
 
-# Frontend: 34 tests (Vitest + React Testing Library), with the API
+# Frontend: 38 tests (Vitest + React Testing Library), with the API
 # client and AuthContext mocked
 cd client
 npm test

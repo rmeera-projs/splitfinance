@@ -2,6 +2,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
+const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../services/categorizationService");
 
 const splitSchema = z.object({
@@ -31,18 +32,6 @@ const updateExpenseSchema = z.object({
 const updateCategorySchema = z.object({
   category: z.enum(CATEGORIES),
 });
-
-// A finalized group is a closed ledger: no new/edited/deleted expenses, but
-// settlements (see settlementController) are still allowed against it.
-async function assertGroupNotFinalized(groupId) {
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { isFinalized: true },
-  });
-  if (group?.isFinalized) {
-    throw new ApiError(400, "This group is finalized - reopen it to change expenses");
-  }
-}
 
 async function createExpense(req, res, next) {
   try {
