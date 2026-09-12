@@ -6,3 +6,13 @@ dist/
 build/
 *.log
 .DS_Store
+
+# Terraform - state and generated secrets never belong in git.
+# terraform.lock.hcl (provider version lockfile) is intentionally NOT
+# ignored - that one should be committed, like package-lock.json.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/*.pem
+terraform/tfplan
