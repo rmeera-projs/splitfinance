@@ -27,6 +27,9 @@ export default function GroupPage() {
   const [editSplitValues, setEditSplitValues] = useState({});
   const [editError, setEditError] = useState("");
 
+  const [memberEmails, setMemberEmails] = useState("");
+  const [memberError, setMemberError] = useState("");
+
   useEffect(() => {
     fetchGroup();
     api
@@ -208,6 +211,32 @@ export default function GroupPage() {
     }
   }
 
+  // Same comma/newline-separated pattern as creating a group (DashboardPage) -
+  // only emails that already belong to a registered user get added, and any
+  // that don't (or that are already members) are reported back and skipped.
+  async function handleAddMembers(e) {
+    e.preventDefault();
+    setMemberError("");
+    const emails = memberEmails
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (emails.length === 0) return;
+
+    try {
+      const { data } = await api.post(`/groups/${id}/members`, { memberEmails: emails });
+      setMemberEmails("");
+      if (data.unmatchedEmails?.length) {
+        setMemberError(
+          `Added, but these emails have no account yet so weren't added: ${data.unmatchedEmails.join(", ")}`
+        );
+      }
+      fetchGroup();
+    } catch (err) {
+      setMemberError(err.response?.data?.error || "Failed to add member");
+    }
+  }
+
   async function handleToggleFinalize() {
     const finalized = !group.isFinalized;
     const message = finalized
@@ -273,6 +302,38 @@ export default function GroupPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="font-semibold mb-2">Members</h2>
+        <ul className="flex flex-wrap gap-2 mb-3">
+          {group.members.map((m) => (
+            <li
+              key={m.user.id}
+              className="text-sm bg-white border rounded-full px-3 py-1"
+            >
+              {m.user.id === user.id ? "You" : m.user.name}
+            </li>
+          ))}
+        </ul>
+        {group.isFinalized ? (
+          <p className="text-sm text-gray-500">
+            This group is finalized. Reopen it to add members.
+          </p>
+        ) : (
+          <form onSubmit={handleAddMembers} className="flex gap-2">
+            <input
+              className="flex-1 border rounded px-3 py-2 text-sm"
+              placeholder="Add by email, comma separated (must already have an account)"
+              value={memberEmails}
+              onChange={(e) => setMemberEmails(e.target.value)}
+            />
+            <button className="text-sm border px-3 py-2 rounded hover:bg-gray-50">
+              Add
+            </button>
+          </form>
+        )}
+        {memberError && <p className="text-sm text-red-600 mt-2">{memberError}</p>}
       </section>
 
       <section className="mb-8">

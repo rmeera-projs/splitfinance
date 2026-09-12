@@ -74,6 +74,11 @@ function mockGroupResponse(response) {
 function activitySection() {
   return within(screen.getByText("Activity").closest("section"));
 }
+// "You"/member names also appear in the "Paid by" select options - scope to
+// the Members section to avoid ambiguous matches.
+function membersSection() {
+  return within(screen.getByText("Members").closest("section"));
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -151,7 +156,9 @@ describe("GroupPage - adding an expense", () => {
 
     renderGroupPage();
 
-    expect(await screen.findByText(/this group is finalized/i)).toBeInTheDocument();
+    // The Members section shows its own "finalized" message too - match the
+    // expense-specific wording so this doesn't collide with it.
+    expect(await screen.findByText(/reopen it to add expenses/i)).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Description")).not.toBeInTheDocument();
   });
 });
@@ -321,6 +328,63 @@ describe("GroupPage - finalize/reopen", () => {
 
     expect(await screen.findByText("Reopen group")).toBeInTheDocument();
     expect(screen.getByText("Finalized")).toBeInTheDocument();
+  });
+});
+
+describe("GroupPage - adding members", () => {
+  test("lists current members", async () => {
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    expect(membersSection().getByText("You")).toBeInTheDocument();
+    expect(membersSection().getByText("Bob")).toBeInTheDocument();
+  });
+
+  test("submits comma-separated emails to add", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockResolvedValue({ data: { ...baseGroup(), unmatchedEmails: [] } });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(
+      screen.getByPlaceholderText(/add by email/i),
+      "carol@example.com, dave@example.com"
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/groups/7/members", {
+        memberEmails: ["carol@example.com", "dave@example.com"],
+      })
+    );
+  });
+
+  test("surfaces unmatched emails after adding", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockResolvedValue({ data: { ...baseGroup(), unmatchedEmails: ["nobody@example.com"] } });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText(/add by email/i), "nobody@example.com");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText(/nobody@example.com/)).toBeInTheDocument();
+  });
+
+  test("hides the add-member form and shows a message when the group is finalized", async () => {
+    mockGroupResponse({ data: baseGroup({ isFinalized: true }) });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    expect(screen.getByText(/reopen it to add members/i)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/add by email/i)).not.toBeInTheDocument();
   });
 });
 

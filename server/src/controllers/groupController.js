@@ -3,10 +3,15 @@ const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { getGroupBalances } = require("../services/balanceService");
 const { publicUserSelect } = require("../utils/publicUser");
+const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 
 const createGroupSchema = z.object({
   name: z.string().min(1),
   memberEmails: z.array(z.string().email()).optional().default([]),
+});
+
+const addMembersSchema = z.object({
+  memberEmails: z.array(z.string().email()).min(1),
 });
 
 const setFinalizedSchema = z.object({
@@ -44,6 +49,56 @@ async function createGroup(req, res, next) {
     const unmatchedEmails = memberEmails.filter((e) => !foundEmails.has(e));
 
     res.status(201).json({ ...group, unmatchedEmails });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Any group member can add more people - there's no owner-only restriction,
+// consistent with finalize/reopen. Blocked once the group is finalized: a
+// finalized group is meant to be a closed, settled ledger, and letting
+// membership drift after that would undercut what "finalized" means.
+async function addMembers(req, res, next) {
+  try {
+    const groupId = Number(req.params.id);
+    const { memberEmails } = addMembersSchema.parse(req.body);
+
+    const membership = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: req.userId } },
+    });
+    if (!membership) throw new ApiError(403, "You are not a member of this group");
+
+    await assertGroupNotFinalized(groupId);
+
+    const users = await prisma.user.findMany({
+      where: { email: { in: memberEmails } },
+    });
+
+    const existingMembers = await prisma.groupMember.findMany({
+      where: { groupId },
+      select: { userId: true },
+    });
+    const existingIds = new Set(existingMembers.map((m) => m.userId));
+
+    const toAdd = users.filter((u) => !existingIds.has(u.id));
+    if (toAdd.length > 0) {
+      await prisma.groupMember.createMany({
+        data: toAdd.map((u) => ({ groupId, userId: u.id })),
+      });
+    }
+
+    // Same reporting pattern as createGroup: emails that don't match a
+    // registered user, or that were already members, are silently skipped
+    // above - surface both back to the caller.
+    const foundEmails = new Set(users.map((u) => u.email));
+    const unmatchedEmails = memberEmails.filter((e) => !foundEmails.has(e));
+
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { members: { include: { user: { select: publicUserSelect } } } },
+    });
+
+    res.status(200).json({ ...group, unmatchedEmails });
   } catch (err) {
     next(err);
   }
@@ -111,4 +166,4 @@ async function setFinalized(req, res, next) {
   }
 }
 
-module.exports = { createGroup, listMyGroups, getGroup, setFinalized };
+module.exports = { createGroup, listMyGroups, getGroup, setFinalized, addMembers };
