@@ -1,6 +1,7 @@
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
+const { emitGroupActivity } = require("../services/realtimeService");
 
 const createSettlementSchema = z.object({
   groupId: z.number(),
@@ -22,6 +23,7 @@ async function createSettlement(req, res, next) {
       data: { groupId, fromUser: req.userId, toUser, amount },
     });
 
+    emitGroupActivity(groupId, { type: "settlement", actorId: req.userId });
     res.status(201).json(settlement);
   } catch (err) {
     next(err);

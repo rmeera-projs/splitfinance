@@ -3,6 +3,21 @@ import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
+import { getSocket } from "../realtime/socket";
+
+// Human-readable text for the "someone else changed this group" banner -
+// deliberately generic (not "Alice added an expense") since the payload
+// only carries an actorId, not a name; nameFor() below fills that in.
+const ACTIVITY_MESSAGES = {
+  "expense-added": "added an expense",
+  "expense-updated": "edited an expense",
+  "expense-deleted": "deleted an expense",
+  "expense-category": "changed an expense's category",
+  settlement: "recorded a settlement",
+  finalize: "finalized this group",
+  reopen: "reopened this group",
+  "member-added": "added a member",
+};
 
 export default function GroupPage() {
   const { id } = useParams();
@@ -30,6 +45,12 @@ export default function GroupPage() {
   const [memberEmails, setMemberEmails] = useState("");
   const [memberError, setMemberError] = useState("");
 
+  // Set when a socket "group-activity" event arrives for this group from
+  // someone else - shown as a dismissable banner rather than silently
+  // refetching, so an in-progress edit/add form is never yanked out from
+  // under the person using it.
+  const [activityNotice, setActivityNotice] = useState(null);
+
   useEffect(() => {
     fetchGroup();
     api
@@ -37,6 +58,30 @@ export default function GroupPage() {
       .then(({ data }) => setCategories(data.categories))
       .catch(() => {});
   }, [id]);
+
+  // Live "someone changed this group" notice via WebSocket. Joins this
+  // group's room on mount and leaves it on unmount/id change - a socket
+  // only ever needs to hear about the one group currently on screen.
+  useEffect(() => {
+    const socket = getSocket();
+    socket.connect();
+    socket.emit("join-group", id);
+
+    function handleActivity(payload) {
+      if (String(payload.groupId) !== String(id)) return;
+      // It was our own action from this same tab - we already have the
+      // fresh data from the API response that triggered it.
+      if (payload.actorId === user.id) return;
+      setActivityNotice(payload);
+    }
+
+    socket.on("group-activity", handleActivity);
+
+    return () => {
+      socket.emit("leave-group", id);
+      socket.off("group-activity", handleActivity);
+    };
+  }, [id, user.id]);
 
   async function fetchGroup() {
     const { data } = await api.get(`/groups/${id}`);
@@ -255,6 +300,11 @@ export default function GroupPage() {
     return group.members.find((m) => m.user.id === userId)?.user.name || "Unknown";
   }
 
+  function refreshFromNotice() {
+    setActivityNotice(null);
+    fetchGroup();
+  }
+
   if (!group) return null;
 
   return (
@@ -278,6 +328,27 @@ export default function GroupPage() {
           {group.isFinalized ? "Reopen group" : "Finalize group"}
         </button>
       </div>
+
+      {activityNotice && (
+        <div className="mb-6 flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded px-3 py-2">
+          <span>
+            {nameFor(activityNotice.actorId)}{" "}
+            {ACTIVITY_MESSAGES[activityNotice.type] || "made a change"} - refresh to see it.
+          </span>
+          <div className="flex gap-3 shrink-0">
+            <button onClick={refreshFromNotice} className="font-medium hover:underline">
+              Refresh
+            </button>
+            <button
+              onClick={() => setActivityNotice(null)}
+              aria-label="Dismiss"
+              className="text-amber-500 hover:text-amber-700"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       <section className="mb-8">
         <h2 className="font-semibold mb-2">Balances</h2>
@@ -347,6 +418,7 @@ export default function GroupPage() {
           }))}
           dimensionLabel="Member"
           dimension={(item) => item.payer}
+          dimensionValues={group.members.map((m) => m.user.name)}
         />
       </section>
 

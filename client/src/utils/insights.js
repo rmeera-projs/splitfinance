@@ -31,8 +31,18 @@ export function aggregateByCategory(items) {
 // `keyFn` extracts the breakdown label from an item - the payer's name for
 // the per-group "By Member" view, or the group's name for the personal
 // "By Group" view.
-export function aggregateByDimension(items, keyFn) {
-  return aggregateByTotal(items, keyFn);
+//
+// `knownLabels`, if given, is every label that *should* appear even if it
+// has no items yet - e.g. every current group member's name, so someone
+// just added to the group shows up at $0 instead of being missing from the
+// breakdown entirely (which reads as "insights didn't update").
+export function aggregateByDimension(items, keyFn, knownLabels) {
+  const result = aggregateByTotal(items, keyFn);
+  if (!knownLabels) return result;
+
+  const present = new Set(result.map((r) => r.label));
+  const zeros = knownLabels.filter((label) => !present.has(label)).map((label) => ({ label, total: 0 }));
+  return [...result, ...zeros].sort((a, b) => b.total - a.total);
 }
 
 // Buckets item.date by day/week/month. Returns a *sortable* key (so buckets

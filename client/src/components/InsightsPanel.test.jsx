@@ -68,4 +68,37 @@ describe("InsightsPanel", () => {
     expect(time.getByText("Feb 15")).toBeInTheDocument();
     expect(time.queryByText("Jan 2026")).not.toBeInTheDocument();
   });
+
+  describe("dimensionValues (e.g. a group's full member list)", () => {
+    test("shows a member with no expenses yet at $0 instead of omitting them", () => {
+      render(
+        <InsightsPanel
+          items={items}
+          dimensionLabel="Member"
+          dimension={(i) => i.payer}
+          dimensionValues={["Alice", "Bob", "Carol"]}
+        />
+      );
+
+      const member = section("By Member");
+      expect(member.getByText("Carol")).toBeInTheDocument();
+      expect(member.getByText("$0.00")).toBeInTheDocument();
+    });
+
+    test("still renders the By-Member column (everyone at $0) even with zero expenses", () => {
+      render(
+        <InsightsPanel
+          items={[]}
+          dimensionLabel="Member"
+          dimension={(i) => i.payer}
+          dimensionValues={["Alice", "Bob"]}
+        />
+      );
+
+      expect(screen.queryByText(/no expenses yet/i)).not.toBeInTheDocument();
+      const member = section("By Member");
+      expect(member.getByText("Alice")).toBeInTheDocument();
+      expect(member.getByText("Bob")).toBeInTheDocument();
+    });
+  });
 });

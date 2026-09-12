@@ -38,16 +38,23 @@ const GRANULARITIES = ["day", "week", "month"];
  * @param {Array<{amount: number, category: string, date: string}>} items
  * @param {string} dimensionLabel - heading for the third breakdown, e.g. "Member" or "Group"
  * @param {(item: object) => string} dimension - extracts that breakdown's label from an item
+ * @param {string[]} [dimensionValues] - every label that should appear in the
+ *   By-{dimensionLabel} breakdown even at $0 (e.g. every current group
+ *   member's name), so someone with no expenses yet still shows up instead
+ *   of silently missing from the chart
  */
-export default function InsightsPanel({ items, dimensionLabel, dimension }) {
+export default function InsightsPanel({ items, dimensionLabel, dimension, dimensionValues }) {
   const [granularity, setGranularity] = useState("month");
 
-  if (items.length === 0) {
+  // Only bail out entirely when there's truly nothing to show - if
+  // dimensionValues was given, the By-{dimensionLabel} column still has
+  // something worth rendering (everyone at $0) even with zero expenses.
+  if (items.length === 0 && !dimensionValues?.length) {
     return <p className="text-sm text-gray-500">No expenses yet.</p>;
   }
 
   const byCategory = aggregateByCategory(items);
-  const byDimension = aggregateByDimension(items, dimension);
+  const byDimension = aggregateByDimension(items, dimension, dimensionValues);
   const byTime = aggregateByTime(items, granularity);
 
   return (

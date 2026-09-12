@@ -1,10 +1,11 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import GroupPage from "./GroupPage";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { __mockSocket } from "../realtime/socket";
 
 vi.mock("../api/client", () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -17,6 +18,11 @@ vi.mock("../context/AuthContext", () => ({
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, useParams: () => ({ id: "7" }) };
+});
+
+vi.mock("../realtime/socket", () => {
+  const mockSocket = { connect: vi.fn(), emit: vi.fn(), on: vi.fn(), off: vi.fn() };
+  return { getSocket: () => mockSocket, __mockSocket: mockSocket };
 });
 
 // Mirrors the server's fixed list closely enough for these tests - exact
@@ -78,6 +84,12 @@ function activitySection() {
 // the Members section to avoid ambiguous matches.
 function membersSection() {
   return within(screen.getByText("Members").closest("section"));
+}
+// Invokes whatever handler GroupPage registered for "group-activity", as if
+// the server had just emitted it over the (mocked) socket.
+function triggerActivity(payload) {
+  const call = __mockSocket.on.mock.calls.find(([event]) => event === "group-activity");
+  act(() => call[1](payload));
 }
 
 beforeEach(() => {
@@ -331,6 +343,35 @@ describe("GroupPage - finalize/reopen", () => {
   });
 });
 
+describe("GroupPage - insights includes every current member", () => {
+  test("a member with no expenses yet still appears in the By Member breakdown, at $0", async () => {
+    mockGroupResponse({
+      data: baseGroup({
+        expenses: [
+          {
+            id: 1,
+            payer: ME,
+            amount: "20",
+            description: "Dinner",
+            category: "Food & Drink",
+            splits: [{ userId: ME.id, amountOwed: 20 }],
+          },
+        ],
+      }),
+    });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    const insights = within(screen.getByText("Insights").closest("section"));
+    // Bob (OTHER) never paid for anything, but he's still a current member -
+    // this is exactly what's missing if a newly-added member "doesn't show
+    // up" in insights.
+    expect(insights.getByText("Bob")).toBeInTheDocument();
+    expect(insights.getByText("$0.00")).toBeInTheDocument();
+  });
+});
+
 describe("GroupPage - adding members", () => {
   test("lists current members", async () => {
     mockGroupResponse({ data: baseGroup() });
@@ -385,6 +426,88 @@ describe("GroupPage - adding members", () => {
 
     expect(screen.getByText(/reopen it to add members/i)).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/add by email/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("GroupPage - live activity notice", () => {
+  test("joins the group's socket room on mount and leaves it on unmount", async () => {
+    mockGroupResponse({ data: baseGroup() });
+
+    const { unmount } = renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    expect(__mockSocket.connect).toHaveBeenCalled();
+    expect(__mockSocket.emit).toHaveBeenCalledWith("join-group", "7");
+
+    unmount();
+    expect(__mockSocket.emit).toHaveBeenCalledWith("leave-group", "7");
+  });
+
+  test("shows a banner naming who made the change, when it's someone else", async () => {
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    triggerActivity({ groupId: 7, type: "expense-added", actorId: OTHER.id });
+
+    expect(await screen.findByText(/bob added an expense/i)).toBeInTheDocument();
+  });
+
+  test("ignores activity the current user caused themselves", async () => {
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    triggerActivity({ groupId: 7, type: "expense-added", actorId: ME.id });
+
+    expect(screen.queryByText(/added an expense/i)).not.toBeInTheDocument();
+  });
+
+  test("ignores activity for a different group", async () => {
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    triggerActivity({ groupId: 999, type: "expense-added", actorId: OTHER.id });
+
+    expect(screen.queryByText(/added an expense/i)).not.toBeInTheDocument();
+  });
+
+  test("clicking Refresh on the banner refetches the group and dismisses it", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+    api.get.mockClear();
+
+    triggerActivity({ groupId: 7, type: "settlement", actorId: OTHER.id });
+    await screen.findByText(/recorded a settlement/i);
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/groups/7"));
+    expect(screen.queryByText(/recorded a settlement/i)).not.toBeInTheDocument();
+  });
+
+  test("dismissing the banner hides it without refetching", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+    api.get.mockClear();
+
+    triggerActivity({ groupId: 7, type: "member-added", actorId: OTHER.id });
+    await screen.findByText(/added a member/i);
+
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(screen.queryByText(/added a member/i)).not.toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalled();
   });
 });
 
