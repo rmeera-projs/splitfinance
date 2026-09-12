@@ -1,0 +1,29 @@
+# Production build, separate from the root Dockerfile (which runs Vite's
+# dev server and is only meant for local docker-compose use). Vite bakes
+# VITE_API_URL into the built JS at build time, not at container start, so
+# it has to be passed as a build ARG here rather than a runtime env var -
+# whichever platform builds this image needs to supply --build-arg
+# VITE_API_URL=https://your-backend-url/api (Railway/Render call this a
+# "build-time" or "build" variable in their service settings).
+FROM node:20-alpine AS build
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+RUN npm run build
+
+FROM node:20-alpine
+WORKDIR /app
+RUN npm install -g serve
+
+COPY --from=build /app/dist ./dist
+
+EXPOSE 4173
+# -s (single-page app mode) so client-side routes like /groups/:id fall back
+# to index.html instead of 404ing on a hard refresh.
+CMD ["serve", "-s", "dist", "-l", "4173"]

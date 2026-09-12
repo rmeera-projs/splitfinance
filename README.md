@@ -159,6 +159,13 @@ COHERE_API_KEY="your-key-here"
 `docker-compose.yml` picks it up via `${COHERE_API_KEY}` substitution. This
 root `.env` is git-ignored, same as `server/.env`.
 
+## 🚢 Deploying for real
+See [DEPLOYMENT.md](DEPLOYMENT.md) for a step-by-step Railway deployment (a
+Postgres database, the API, and the frontend, each from this repo's own
+Dockerfiles). Note that `client/Dockerfile.prod` - not the root
+`client/Dockerfile`, which runs Vite's dev server - is what production
+deploys should build.
+
 ## 🧪 Testing
 
 73 tests total (39 backend, 34 frontend), with everything external mocked -
