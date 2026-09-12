@@ -68,6 +68,12 @@ function mockGroupResponse(response) {
     return Promise.resolve(response);
   });
 }
+// The Insights section can render the same category/"Other" text that
+// appears on an expense's badge/dropdown - scope activity-feed assertions
+// to this section to avoid ambiguous matches against the Insights panel.
+function activitySection() {
+  return within(screen.getByText("Activity").closest("section"));
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -101,7 +107,7 @@ describe("GroupPage - rendering", () => {
     expect(screen.getByText(/owes/)).toBeInTheDocument();
     // "$" and the amount render as separate text nodes, so match loosely.
     expect(screen.getByText(/10\.00/)).toBeInTheDocument();
-    expect(screen.getByText("Food & Drink")).toBeInTheDocument();
+    expect(activitySection().getByText("Food & Drink")).toBeInTheDocument();
   });
 
   test("shows a settled-up message when there are no balances", async () => {
@@ -372,7 +378,7 @@ describe("GroupPage - manual category override", () => {
     await screen.findByText(/Arcade tokens/);
 
     expect(screen.queryByTitle("Change category")).not.toBeInTheDocument();
-    expect(screen.getByText("Other")).toBeInTheDocument();
+    expect(activitySection().getByText("Other")).toBeInTheDocument();
   });
 
   test("still shows the dropdown even when the group is finalized", async () => {

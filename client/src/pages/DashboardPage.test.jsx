@@ -22,6 +22,22 @@ function renderDashboard() {
   );
 }
 
+// Dispatches api.get by URL - the dashboard fetches both /groups and
+// /insights on mount (and re-fetches /groups after creating a group), so a
+// single mockResolvedValue would answer both endpoints with the same shape.
+function mockApiGet({ groups, insightItems = [] }) {
+  api.get.mockImplementation((url) => {
+    if (url === "/insights") {
+      return Promise.resolve({ data: { items: insightItems } });
+    }
+    return Promise.resolve({ data: groups });
+  });
+}
+
+function callsTo(url) {
+  return api.get.mock.calls.filter(([u]) => u === url).length;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   useAuth.mockReturnValue({ user: { id: 1, name: "Alice" }, logout: vi.fn() });
@@ -29,8 +45,8 @@ beforeEach(() => {
 
 describe("DashboardPage", () => {
   test("lists the user's groups, with a Finalized badge on finalized ones", async () => {
-    api.get.mockResolvedValue({
-      data: [
+    mockApiGet({
+      groups: [
         { id: 1, name: "Roommates", isFinalized: false, members: [{}, {}] },
         { id: 2, name: "Ski Trip", isFinalized: true, members: [{}] },
       ],
@@ -45,16 +61,31 @@ describe("DashboardPage", () => {
   });
 
   test("shows an empty state when there are no groups", async () => {
-    api.get.mockResolvedValue({ data: [] });
+    mockApiGet({ groups: [] });
 
     renderDashboard();
 
     expect(await screen.findByText(/no groups yet/i)).toBeInTheDocument();
   });
 
+  test("shows the personal spending breakdown fetched from /insights", async () => {
+    mockApiGet({
+      groups: [],
+      insightItems: [
+        { amount: 12, category: "Food & Drink", date: "2026-01-05", groupId: 1, groupName: "Roommates" },
+      ],
+    });
+
+    renderDashboard();
+
+    expect(await screen.findByText("Your Spending")).toBeInTheDocument();
+    expect(screen.getByText("Roommates")).toBeInTheDocument();
+    expect(screen.getByText("Food & Drink")).toBeInTheDocument();
+  });
+
   test("creates a group with invited emails and refreshes the list", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({ data: [] });
+    mockApiGet({ groups: [] });
     api.post.mockResolvedValue({ data: { id: 3, unmatchedEmails: [] } });
 
     renderDashboard();
@@ -73,13 +104,13 @@ describe("DashboardPage", () => {
         memberEmails: ["bob@example.com", "carol@example.com"],
       })
     );
-    // Refetches after creating.
-    expect(api.get).toHaveBeenCalledTimes(2);
+    // Once on mount, once more after creating.
+    await waitFor(() => expect(callsTo("/groups")).toBe(2));
   });
 
   test("surfaces unmatched invite emails as an error instead of silently dropping them", async () => {
     const user = userEvent.setup();
-    api.get.mockResolvedValue({ data: [] });
+    mockApiGet({ groups: [] });
     api.post.mockResolvedValue({ data: { id: 3, unmatchedEmails: ["nobody@example.com"] } });
 
     renderDashboard();

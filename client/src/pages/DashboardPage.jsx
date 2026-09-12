@@ -2,16 +2,22 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import InsightsPanel from "../components/InsightsPanel";
 
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const [groups, setGroups] = useState([]);
+  const [insightItems, setInsightItems] = useState([]);
   const [newGroupName, setNewGroupName] = useState("");
   const [memberEmails, setMemberEmails] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetchGroups();
+    api
+      .get("/insights")
+      .then(({ data }) => setInsightItems(data.items))
+      .catch(() => {});
   }, []);
 
   async function fetchGroups() {
@@ -54,6 +60,11 @@ export default function DashboardPage() {
           Log out
         </button>
       </div>
+
+      <section className="mb-8">
+        <h2 className="font-semibold mb-2">Your Spending</h2>
+        <InsightsPanel items={insightItems} dimensionLabel="Group" dimension={(item) => item.groupName} />
+      </section>
 
       <form onSubmit={handleCreateGroup} className="mb-6 space-y-2">
         <div className="flex gap-2">

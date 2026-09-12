@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import InsightsPanel from "../components/InsightsPanel";
 
 export default function GroupPage() {
   const { id } = useParams();
@@ -272,6 +273,20 @@ export default function GroupPage() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="font-semibold mb-2">Insights</h2>
+        <InsightsPanel
+          items={group.expenses.map((exp) => ({
+            amount: Number(exp.amount),
+            category: exp.category,
+            date: exp.date,
+            payer: exp.payer.name,
+          }))}
+          dimensionLabel="Member"
+          dimension={(item) => item.payer}
+        />
       </section>
 
       <section className="mb-8">
