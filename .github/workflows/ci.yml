@@ -1,0 +1,89 @@
+name: CI
+
+# Runs on every PR/push to main so broken tests are caught before merge, and
+# on push (i.e. after a merge lands on main) also deploys to the AWS EC2
+# instance - only if both test jobs passed first.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      # Needed even though every test mocks Prisma directly - some modules
+      # import @prisma/client at load time, so the generated client has to
+      # exist (same reason the server Dockerfile runs this before its build).
+      - name: Generate Prisma client
+        working-directory: server
+        run: npx prisma generate
+
+      - name: Run tests
+        working-directory: server
+        run: npm test
+
+  frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Run tests
+        working-directory: client
+        run: npm test
+
+      # Not deployed anywhere - just a smoke check that the production
+      # build (what client/Dockerfile.prod and the AWS deploy both run)
+      # actually compiles.
+      - name: Build
+        working-directory: client
+        run: npm run build
+
+  deploy:
+    name: Deploy to AWS
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in, pull latest, and rebuild containers
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key "ubuntu@$EC2_HOST" '
+            set -e
+            cd /opt/splitfinance
+            sudo git fetch origin
+            sudo git reset --hard origin/main
+            sudo docker compose up -d --build
+          '
