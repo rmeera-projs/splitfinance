@@ -131,10 +131,13 @@ volumes:
   caddy_config:
 EOF
 
-# The API (Express/helmet) already sets these for its own responses -
-# repeated here too so the frontend site (a static build served by "serve",
-# no Express in front of it to add them) gets the same baseline, and so
-# neither site depends on the other's stack to stay protected.
+# Only the frontend site gets a header block here - it's a static build
+# served by "serve", with no Express of its own to add these. The API
+# already gets them from helmet (server/src/app.js) on every response;
+# adding the same headers again here would just duplicate them, and with
+# different defaults between helmet and Caddy for X-Frame-Options and
+# Referrer-Policy specifically, the API would end up sending two
+# conflicting values for the same header instead of one consistent one.
 cat > Caddyfile <<EOF
 ${domain_name} {
 	header {
@@ -147,12 +150,6 @@ ${domain_name} {
 }
 
 ${api_domain_name} {
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-	}
 	reverse_proxy server:5000
 }
 EOF
