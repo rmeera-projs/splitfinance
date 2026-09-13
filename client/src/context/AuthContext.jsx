@@ -33,8 +33,19 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
+  // Neither of these establishes a session (no token comes back) - they
+  // just proxy to the API so ForgotPasswordPage/ResetPasswordPage don't
+  // need to know the endpoint shapes directly, same as login/signup above.
+  async function forgotPassword(email) {
+    await api.post("/auth/forgot-password", { email });
+  }
+
+  async function resetPassword(token, newPassword) {
+    await api.post("/auth/reset-password", { token, newPassword });
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, forgotPassword, resetPassword }}>
       {children}
     </AuthContext.Provider>
   );

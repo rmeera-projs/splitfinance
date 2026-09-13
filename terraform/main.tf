@@ -147,6 +147,7 @@ resource "aws_instance" "app" {
     eip_address     = aws_eip.app.public_ip
     jwt_secret      = random_password.jwt_secret.result
     cohere_api_key  = var.cohere_api_key
+    resend_api_key  = var.resend_api_key
     repo_url        = var.repo_url
     repo_branch     = var.repo_branch
   })

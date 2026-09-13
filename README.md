@@ -7,6 +7,11 @@ expenses and settle up with the minimum number of payments.
 
 - **Auth** — JWT-based signup/login with hashed passwords; every account has
   a unique username (letters, numbers, underscores) alongside its email
+- **Password Reset** — a self-service "forgot password" flow: request a
+  link by email, click it, set a new password. Reset tokens are single-use,
+  expire in 1 hour, and the request endpoint responds identically whether
+  or not the email is registered, so it can't be used to check who has an
+  account
 - **Groups** — create groups, invite members by email *or* username, and
   add more members to a group after it's already been created
 - **Expenses** — log, edit, or delete expenses (editor-only), with 3 ways to split
@@ -120,6 +125,27 @@ Group pages stay current across everyone viewing them via
   under Jest/Supertest - `emitGroupActivity` is a safe no-op in every
   backend test
 
+## 🔑 Password Reset
+
+`POST /api/auth/forgot-password` and `POST /api/auth/reset-password`
+(implemented in [`authController.js`](server/src/controllers/authController.js),
+emailed via [`emailService.js`](server/src/services/emailService.js) and
+[Resend](https://resend.com)):
+
+- A raw reset token is emailed to the user and **never stored** - only its
+  SHA-256 hash lives in the database, the same reasoning as hashing
+  passwords: a database leak alone shouldn't hand out usable reset links
+- Tokens expire after 1 hour and are single-use (marked spent in the same
+  transaction that updates the password), so a reused or stale link fails
+  with a generic "invalid or expired" error
+- `forgot-password` always returns the same success message whether or not
+  the email is registered - a different response would let anyone use the
+  endpoint to check which emails have accounts
+- If `RESEND_API_KEY` isn't set, the reset link is logged to the console
+  instead of emailed - the endpoint still "succeeds" (no behavioral
+  difference to detect), which is enough for local development without a
+  Resend account
+
 ## 🏗️ Architecture
 
 ```
@@ -132,7 +158,7 @@ splitfinance/
 ```
 
 ### API Surface
-14 REST endpoints across 5 resources (auth, groups, expenses, settlements,
+16 REST endpoints across 5 resources (auth, groups, expenses, settlements,
 insights) - see `server/src/routes/`.
 
 ### Tech Stack
@@ -142,6 +168,7 @@ insights) - see `server/src/routes/`.
 | Backend | Node.js, Express, Prisma ORM |
 | Database | PostgreSQL |
 | Auth | JWT + bcrypt |
+| Email | Resend (password reset links) |
 | Real-time | Socket.IO (live group activity notices) |
 | AI | Cohere Chat API (expense auto-categorization) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
@@ -188,18 +215,33 @@ This is optional — without it, every expense is categorized as `"Other"` and
 everything else works normally. No key is needed to run the test suite; the
 Cohere client is fully mocked in tests.
 
+#### Resend API key (optional)
+Password reset emails need a [Resend](https://resend.com) API key (free
+tier, no domain verification required to start — their default
+`onboarding@resend.dev` sender works immediately). Add it to `server/.env`:
+```
+RESEND_API_KEY="your-key-here"
+```
+This is optional — without it, `forgot-password` still responds
+successfully (so it never leaks whether an email is registered), but the
+reset link is only logged to the server's console instead of emailed,
+which is enough to test the flow locally. No key is needed to run the test
+suite; Resend is fully mocked in tests.
+
 ### Run everything with Docker
 ```bash
 docker-compose up --build
 ```
 The `server` container reads its environment from `docker-compose.yml`, not
-from `server/.env` — so to enable auto-categorization under Docker, put the
-key in a `.env` file at the **repo root** (not `server/.env`) instead:
+from `server/.env` — so to enable auto-categorization or real password
+reset emails under Docker, put the keys in a `.env` file at the **repo
+root** (not `server/.env`) instead:
 ```
 COHERE_API_KEY="your-key-here"
+RESEND_API_KEY="your-key-here"
 ```
-`docker-compose.yml` picks it up via `${COHERE_API_KEY}` substitution. This
-root `.env` is git-ignored, same as `server/.env`.
+`docker-compose.yml` picks them up via `${COHERE_API_KEY}`/`${RESEND_API_KEY}`
+substitution. This root `.env` is git-ignored, same as `server/.env`.
 
 ## 🚢 Deploying for real
 See [DEPLOYMENT.md](DEPLOYMENT.md) for a step-by-step Railway deployment (a
@@ -228,18 +270,19 @@ above) doesn't go through this workflow at all.
 
 ## 🧪 Testing
 
-113 tests total (61 backend, 52 frontend), with everything external mocked -
-no live DB, no live Cohere calls, no browser needed.
+127 tests total (68 backend, 59 frontend), with everything external mocked -
+no live DB, no live Cohere calls, no Resend calls, no browser needed.
 
 ```bash
-# Backend: 61 tests (Jest + Supertest), run against the real Express app
-# with a mocked Prisma client and a mocked categorizationService. A handful
-# of these spin up a real (in-process, no external network) Socket.IO
-# server + client to exercise realtimeService's auth and room logic directly.
+# Backend: 68 tests (Jest + Supertest), run against the real Express app
+# with a mocked Prisma client, mocked categorizationService, and mocked
+# emailService. A handful of these spin up a real (in-process, no external
+# network) Socket.IO server + client to exercise realtimeService's auth and
+# room logic directly.
 cd server
 npm test
 
-# Frontend: 52 tests (Vitest + React Testing Library), with the API
+# Frontend: 59 tests (Vitest + React Testing Library), with the API
 # client, AuthContext, and the realtime socket mocked
 cd client
 npm test
@@ -247,15 +290,16 @@ npm test
 
 ## 📁 Data Model
 
-6 tables:
+7 tables:
 
 ```
-users            (id, name, username, email, password_hash, created_at)
-groups           (id, name, created_by, is_finalized, created_at)
-group_members    (group_id, user_id, joined_at)
-expenses         (id, group_id, paid_by, amount, description, category, date, created_at)
-expense_splits   (id, expense_id, user_id, amount_owed)
-settlements      (id, group_id, from_user, to_user, amount, date, created_at)
+users                  (id, name, username, email, password_hash, created_at)
+groups                 (id, name, created_by, is_finalized, created_at)
+group_members          (group_id, user_id, joined_at)
+expenses               (id, group_id, paid_by, amount, description, category, date, created_at)
+expense_splits         (id, expense_id, user_id, amount_owed)
+settlements            (id, group_id, from_user, to_user, amount, date, created_at)
+password_reset_tokens  (id, user_id, token_hash, expires_at, used_at, created_at)
 ```
 
 See `server/prisma/schema.prisma` for the full schema.
@@ -300,9 +344,7 @@ See `server/prisma/schema.prisma` for the full schema.
   amount, and date)
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
-- [ ] Password reset flow - there's currently no way back into an account
-  if you forget your password, which matters more now that real people have
-  real accounts on the live deployment rather than just test data
+- [x] Password reset flow
 - [ ] Rate limiting on auth endpoints - `/api/auth/signup` and `/login` are
   open to the internet with no throttling; worth hardening now that the app
   has a public URL

@@ -15,14 +15,31 @@ model User {
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  groupsOwned     Group[]        @relation("GroupOwner")
-  memberships     GroupMember[]
-  expensesPaid    Expense[]      @relation("ExpensePayer")
-  splits          ExpenseSplit[]
-  settlementsFrom Settlement[]   @relation("SettlementFrom")
-  settlementsTo   Settlement[]   @relation("SettlementTo")
+  groupsOwned         Group[]              @relation("GroupOwner")
+  memberships         GroupMember[]
+  expensesPaid        Expense[]            @relation("ExpensePayer")
+  splits              ExpenseSplit[]
+  settlementsFrom     Settlement[]         @relation("SettlementFrom")
+  settlementsTo       Settlement[]         @relation("SettlementTo")
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
+}
+
+// The raw token is emailed to the user and never stored - only its SHA-256
+// hash lives here, same reasoning as hashing passwords: a database leak
+// alone shouldn't hand out usable reset links.
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
 }
 
 model Group {

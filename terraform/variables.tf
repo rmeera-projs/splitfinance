@@ -22,6 +22,13 @@ variable "cohere_api_key" {
   sensitive   = true
 }
 
+variable "resend_api_key" {
+  description = "Resend API key for password reset emails. Optional - leave empty and reset links are only logged to the instance's console instead of emailed."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "repo_url" {
   description = "Git URL the instance clones on boot."
   type        = string
