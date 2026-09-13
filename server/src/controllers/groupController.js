@@ -6,14 +6,28 @@ const { publicUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 const { emitGroupActivity } = require("../services/realtimeService");
 
+// Each entry can be either an email or a username - resolveUsers() below
+// looks a member up by whichever one it looks like.
 const createGroupSchema = z.object({
   name: z.string().min(1),
-  memberEmails: z.array(z.string().email()).optional().default([]),
+  memberIdentifiers: z.array(z.string().min(1)).optional().default([]),
 });
 
 const addMembersSchema = z.object({
-  memberEmails: z.array(z.string().email()).min(1),
+  memberIdentifiers: z.array(z.string().min(1)).min(1),
 });
+
+// Matches each identifier against either email or username in one query,
+// then reports back which ones didn't match any registered user - shared
+// by createGroup and addMembers so both invite flows behave identically.
+async function resolveUsers(identifiers) {
+  const users = await prisma.user.findMany({
+    where: { OR: [{ email: { in: identifiers } }, { username: { in: identifiers } }] },
+  });
+  const found = new Set(users.flatMap((u) => [u.email, u.username]));
+  const unmatched = identifiers.filter((i) => !found.has(i));
+  return { users, unmatched };
+}
 
 const setFinalizedSchema = z.object({
   finalized: z.boolean(),
@@ -21,11 +35,9 @@ const setFinalizedSchema = z.object({
 
 async function createGroup(req, res, next) {
   try {
-    const { name, memberEmails } = createGroupSchema.parse(req.body);
+    const { name, memberIdentifiers } = createGroupSchema.parse(req.body);
 
-    const members = await prisma.user.findMany({
-      where: { email: { in: memberEmails } },
-    });
+    const { users: members, unmatched: unmatchedIdentifiers } = await resolveUsers(memberIdentifiers);
 
     const group = await prisma.group.create({
       data: {
@@ -43,13 +55,7 @@ async function createGroup(req, res, next) {
       include: { members: { include: { user: { select: publicUserSelect } } } },
     });
 
-    // Invited emails that don't belong to a registered user are silently
-    // skipped above (a group can only hold real accounts) — report them
-    // back so the caller can tell the invite didn't fully go through.
-    const foundEmails = new Set(members.map((m) => m.email));
-    const unmatchedEmails = memberEmails.filter((e) => !foundEmails.has(e));
-
-    res.status(201).json({ ...group, unmatchedEmails });
+    res.status(201).json({ ...group, unmatchedIdentifiers });
   } catch (err) {
     next(err);
   }
@@ -62,7 +68,7 @@ async function createGroup(req, res, next) {
 async function addMembers(req, res, next) {
   try {
     const groupId = Number(req.params.id);
-    const { memberEmails } = addMembersSchema.parse(req.body);
+    const { memberIdentifiers } = addMembersSchema.parse(req.body);
 
     const membership = await prisma.groupMember.findUnique({
       where: { groupId_userId: { groupId, userId: req.userId } },
@@ -71,9 +77,7 @@ async function addMembers(req, res, next) {
 
     await assertGroupNotFinalized(groupId);
 
-    const users = await prisma.user.findMany({
-      where: { email: { in: memberEmails } },
-    });
+    const { users, unmatched: unmatchedIdentifiers } = await resolveUsers(memberIdentifiers);
 
     const existingMembers = await prisma.groupMember.findMany({
       where: { groupId },
@@ -81,18 +85,14 @@ async function addMembers(req, res, next) {
     });
     const existingIds = new Set(existingMembers.map((m) => m.userId));
 
+    // A registered user who's already a member isn't "unmatched" - they
+    // matched fine, there's just nothing new to add for them.
     const toAdd = users.filter((u) => !existingIds.has(u.id));
     if (toAdd.length > 0) {
       await prisma.groupMember.createMany({
         data: toAdd.map((u) => ({ groupId, userId: u.id })),
       });
     }
-
-    // Same reporting pattern as createGroup: emails that don't match a
-    // registered user, or that were already members, are silently skipped
-    // above - surface both back to the caller.
-    const foundEmails = new Set(users.map((u) => u.email));
-    const unmatchedEmails = memberEmails.filter((e) => !foundEmails.has(e));
 
     const group = await prisma.group.findUnique({
       where: { id: groupId },
@@ -102,7 +102,7 @@ async function addMembers(req, res, next) {
     if (toAdd.length > 0) {
       emitGroupActivity(groupId, { type: "member-added", actorId: req.userId });
     }
-    res.status(200).json({ ...group, unmatchedEmails });
+    res.status(200).json({ ...group, unmatchedIdentifiers });
   } catch (err) {
     next(err);
   }

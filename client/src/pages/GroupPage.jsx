@@ -42,7 +42,7 @@ export default function GroupPage() {
   const [editSplitValues, setEditSplitValues] = useState({});
   const [editError, setEditError] = useState("");
 
-  const [memberEmails, setMemberEmails] = useState("");
+  const [memberIdentifiers, setMemberIdentifiers] = useState("");
   const [memberError, setMemberError] = useState("");
 
   // Set when a socket "group-activity" event arrives for this group from
@@ -257,23 +257,24 @@ export default function GroupPage() {
   }
 
   // Same comma/newline-separated pattern as creating a group (DashboardPage) -
-  // only emails that already belong to a registered user get added, and any
-  // that don't (or that are already members) are reported back and skipped.
+  // only emails/usernames that already belong to a registered user get
+  // added, and any that don't (or that are already members) are reported
+  // back and skipped.
   async function handleAddMembers(e) {
     e.preventDefault();
     setMemberError("");
-    const emails = memberEmails
+    const identifiers = memberIdentifiers
       .split(/[,\n]/)
       .map((s) => s.trim())
       .filter(Boolean);
-    if (emails.length === 0) return;
+    if (identifiers.length === 0) return;
 
     try {
-      const { data } = await api.post(`/groups/${id}/members`, { memberEmails: emails });
-      setMemberEmails("");
-      if (data.unmatchedEmails?.length) {
+      const { data } = await api.post(`/groups/${id}/members`, { memberIdentifiers: identifiers });
+      setMemberIdentifiers("");
+      if (data.unmatchedIdentifiers?.length) {
         setMemberError(
-          `Added, but these emails have no account yet so weren't added: ${data.unmatchedEmails.join(", ")}`
+          `Added, but these don't match an account so weren't added: ${data.unmatchedIdentifiers.join(", ")}`
         );
       }
       fetchGroup();
@@ -383,7 +384,8 @@ export default function GroupPage() {
               key={m.user.id}
               className="text-sm bg-white border rounded-full px-3 py-1"
             >
-              {m.user.id === user.id ? "You" : m.user.name}
+              <span>{m.user.id === user.id ? "You" : m.user.name}</span>
+              <span className="text-gray-400"> @{m.user.username}</span>
             </li>
           ))}
         </ul>
@@ -395,9 +397,9 @@ export default function GroupPage() {
           <form onSubmit={handleAddMembers} className="flex gap-2">
             <input
               className="flex-1 border rounded px-3 py-2 text-sm"
-              placeholder="Add by email, comma separated (must already have an account)"
-              value={memberEmails}
-              onChange={(e) => setMemberEmails(e.target.value)}
+              placeholder="Add by email or username, comma separated (must already have an account)"
+              value={memberIdentifiers}
+              onChange={(e) => setMemberIdentifiers(e.target.value)}
             />
             <button className="text-sm border px-3 py-2 rounded hover:bg-gray-50">
               Add

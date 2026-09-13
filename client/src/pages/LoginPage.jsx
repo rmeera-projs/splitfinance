@@ -48,6 +48,11 @@ export default function LoginPage() {
           </button>
         </div>
         <p className="text-sm text-center mt-4">
+          <Link to="/forgot-password" className="text-emerald-600 font-medium">
+            Forgot password?
+          </Link>
+        </p>
+        <p className="text-sm text-center mt-2">
           No account?{" "}
           <Link to="/signup" className="text-emerald-600 font-medium">
             Sign up

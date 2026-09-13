@@ -9,7 +9,7 @@ export default function DashboardPage() {
   const [groups, setGroups] = useState([]);
   const [insightItems, setInsightItems] = useState([]);
   const [newGroupName, setNewGroupName] = useState("");
-  const [memberEmails, setMemberEmails] = useState("");
+  const [memberIdentifiers, setMemberIdentifiers] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -30,20 +30,20 @@ export default function DashboardPage() {
     if (!newGroupName.trim()) return;
     setError("");
 
-    // Comma or newline separated list of emails to invite. Only emails
-    // that already belong to a registered user are added (see README).
-    const emails = memberEmails
+    // Comma or newline separated list of emails/usernames to invite. Only
+    // ones that already belong to a registered user are added (see README).
+    const identifiers = memberIdentifiers
       .split(/[,\n]/)
       .map((s) => s.trim())
       .filter(Boolean);
 
     try {
-      const { data } = await api.post("/groups", { name: newGroupName, memberEmails: emails });
+      const { data } = await api.post("/groups", { name: newGroupName, memberIdentifiers: identifiers });
       setNewGroupName("");
-      setMemberEmails("");
-      if (data.unmatchedEmails?.length) {
+      setMemberIdentifiers("");
+      if (data.unmatchedIdentifiers?.length) {
         setError(
-          `Group created, but these emails have no account yet so weren't added: ${data.unmatchedEmails.join(", ")}`
+          `Group created, but these don't match an account so weren't added: ${data.unmatchedIdentifiers.join(", ")}`
         );
       }
       fetchGroups();
@@ -80,9 +80,9 @@ export default function DashboardPage() {
         </div>
         <input
           className="w-full border rounded px-3 py-2 text-sm"
-          placeholder="Invite by email, comma separated (must already have an account)"
-          value={memberEmails}
-          onChange={(e) => setMemberEmails(e.target.value)}
+          placeholder="Invite by email or username, comma separated (must already have an account)"
+          value={memberIdentifiers}
+          onChange={(e) => setMemberIdentifiers(e.target.value)}
         />
         {error && <p className="text-sm text-red-600">{error}</p>}
       </form>

@@ -6,6 +6,7 @@ export default function SignupPage() {
   const { signup } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -14,7 +15,7 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
     try {
-      await signup(name, email, password);
+      await signup(name, username, email, password);
       navigate("/");
     } catch (err) {
       setError(err.response?.data?.error || "Signup failed");
@@ -31,6 +32,12 @@ export default function SignupPage() {
             placeholder="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            className="w-full border rounded px-3 py-2"
+            placeholder="Username (letters, numbers, underscores)"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
           />
           <input
             className="w-full border rounded px-3 py-2"

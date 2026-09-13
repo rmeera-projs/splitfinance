@@ -33,12 +33,13 @@ fi
 git clone --branch "${repo_branch}" --depth 1 "${repo_url}" /opt/splitfinance
 cd /opt/splitfinance
 
-# COHERE_API_KEY substitutes into docker-compose.yml's existing
-# $${COHERE_API_KEY:-} pattern via this root .env file (docker compose loads
+# COHERE_API_KEY/RESEND_API_KEY substitute into docker-compose.yml's
+# existing $${...:-} patterns via this root .env file (docker compose loads
 # .env from the project root automatically). Written even if empty, so
 # `docker compose` doesn't warn about an unset variable.
 cat > .env <<EOF
 COHERE_API_KEY=${cohere_api_key}
+RESEND_API_KEY=${resend_api_key}
 EOF
 
 # CLIENT_URL/JWT_SECRET/VITE_API_URL are hardcoded literals in the base

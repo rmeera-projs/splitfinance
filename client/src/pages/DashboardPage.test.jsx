@@ -83,10 +83,10 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Food & Drink")).toBeInTheDocument();
   });
 
-  test("creates a group with invited emails and refreshes the list", async () => {
+  test("creates a group with invited emails/usernames and refreshes the list", async () => {
     const user = userEvent.setup();
     mockApiGet({ groups: [] });
-    api.post.mockResolvedValue({ data: { id: 3, unmatchedEmails: [] } });
+    api.post.mockResolvedValue({ data: { id: 3, unmatchedIdentifiers: [] } });
 
     renderDashboard();
     await screen.findByText(/no groups yet/i);
@@ -94,24 +94,24 @@ describe("DashboardPage", () => {
     await user.type(screen.getByPlaceholderText("New group name"), "Cabin Weekend");
     await user.type(
       screen.getByPlaceholderText(/invite by email/i),
-      "bob@example.com, carol@example.com"
+      "bob@example.com, carol123"
     );
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith("/groups", {
         name: "Cabin Weekend",
-        memberEmails: ["bob@example.com", "carol@example.com"],
+        memberIdentifiers: ["bob@example.com", "carol123"],
       })
     );
     // Once on mount, once more after creating.
     await waitFor(() => expect(callsTo("/groups")).toBe(2));
   });
 
-  test("surfaces unmatched invite emails as an error instead of silently dropping them", async () => {
+  test("surfaces unmatched invite identifiers as an error instead of silently dropping them", async () => {
     const user = userEvent.setup();
     mockApiGet({ groups: [] });
-    api.post.mockResolvedValue({ data: { id: 3, unmatchedEmails: ["nobody@example.com"] } });
+    api.post.mockResolvedValue({ data: { id: 3, unmatchedIdentifiers: ["nobody@example.com"] } });
 
     renderDashboard();
     await screen.findByText(/no groups yet/i);
