@@ -261,6 +261,11 @@ See `server/prisma/schema.prisma` for the full schema.
 
 ## 🗺️ Roadmap
 - [x] WebSocket-based real-time updates
+- [ ] Choose who an expense splits between when adding it - equal splits
+  currently always divide across every group member with no way to exclude
+  someone (exact/percentage splits can informally exclude someone by leaving
+  their amount blank, but there's no explicit member-picker for any split
+  type)
 - [ ] Receipt OCR to auto-fill expense amounts
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
