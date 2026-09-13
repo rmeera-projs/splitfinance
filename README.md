@@ -123,8 +123,10 @@ Group pages stay current across everyone viewing them via
 
 ```
 splitfinance/
-├── client/          React (Vite) + Tailwind CSS
-├── server/          Node.js + Express + Prisma + PostgreSQL
+├── client/                React (Vite) + Tailwind CSS
+├── server/                Node.js + Express + Prisma + PostgreSQL
+├── terraform/             AWS EC2 deployment (alternative to Railway)
+├── .github/workflows/     CI: test on every PR, deploy to AWS on merge
 └── docker-compose.yml
 ```
 
@@ -262,6 +264,20 @@ See `server/prisma/schema.prisma` for the full schema.
 - [ ] Receipt OCR to auto-fill expense amounts
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
+- [ ] Password reset flow - there's currently no way back into an account
+  if you forget your password, which matters more now that real people have
+  real accounts on the live deployment rather than just test data
+- [ ] Rate limiting on auth endpoints - `/api/auth/signup` and `/login` are
+  open to the internet with no throttling; worth hardening now that the app
+  has a public URL
+- [ ] Search/filter expenses within a group (by description, category, date
+  range, or payer) - not needed with a handful of test expenses, but a real
+  gap once a group's activity feed grows past a screenful
+- [ ] Multi-currency support - right now every amount is an unlabeled
+  number (implicitly one currency); real trips/roommate groups often mix
+  currencies
+- [ ] CSV export of a group's expenses and settlements - useful for
+  record-keeping or reconciling outside the app
 
 ## 📄 License
 MIT
