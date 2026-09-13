@@ -39,8 +39,8 @@ const CATEGORIES = [
   "Other",
 ];
 
-const ME = { id: 1, name: "Alice" };
-const OTHER = { id: 2, name: "Bob" };
+const ME = { id: 1, name: "Alice", username: "alice1" };
+const OTHER = { id: 2, name: "Bob", username: "bob2" };
 
 function baseGroup(overrides = {}) {
   return {
@@ -383,31 +383,31 @@ describe("GroupPage - adding members", () => {
     expect(membersSection().getByText("Bob")).toBeInTheDocument();
   });
 
-  test("submits comma-separated emails to add", async () => {
+  test("submits comma-separated emails/usernames to add", async () => {
     const user = userEvent.setup();
     mockGroupResponse({ data: baseGroup() });
-    api.post.mockResolvedValue({ data: { ...baseGroup(), unmatchedEmails: [] } });
+    api.post.mockResolvedValue({ data: { ...baseGroup(), unmatchedIdentifiers: [] } });
 
     renderGroupPage();
     await screen.findByText("Ski Trip");
 
     await user.type(
       screen.getByPlaceholderText(/add by email/i),
-      "carol@example.com, dave@example.com"
+      "carol@example.com, dave99"
     );
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith("/groups/7/members", {
-        memberEmails: ["carol@example.com", "dave@example.com"],
+        memberIdentifiers: ["carol@example.com", "dave99"],
       })
     );
   });
 
-  test("surfaces unmatched emails after adding", async () => {
+  test("surfaces unmatched identifiers after adding", async () => {
     const user = userEvent.setup();
     mockGroupResponse({ data: baseGroup() });
-    api.post.mockResolvedValue({ data: { ...baseGroup(), unmatchedEmails: ["nobody@example.com"] } });
+    api.post.mockResolvedValue({ data: { ...baseGroup(), unmatchedIdentifiers: ["nobody@example.com"] } });
 
     renderGroupPage();
     await screen.findByText("Ski Trip");

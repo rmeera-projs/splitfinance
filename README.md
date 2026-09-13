@@ -5,9 +5,10 @@ expenses and settle up with the minimum number of payments.
 
 ## ✨ Features
 
-- **Auth** — JWT-based signup/login with hashed passwords
-- **Groups** — create groups, invite members by email, and add more members
-  to a group after it's already been created
+- **Auth** — JWT-based signup/login with hashed passwords; every account has
+  a unique username (letters, numbers, underscores) alongside its email
+- **Groups** — create groups, invite members by email *or* username, and
+  add more members to a group after it's already been created
 - **Expenses** — log, edit, or delete expenses (editor-only), with 3 ways to split
   a bill: equally, by percentage, or by exact amount
 - **Auto-Categorization** — expenses are automatically tagged with one of 9 fixed
@@ -227,18 +228,18 @@ above) doesn't go through this workflow at all.
 
 ## 🧪 Testing
 
-100 tests total (50 backend, 50 frontend), with everything external mocked -
+113 tests total (61 backend, 52 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no browser needed.
 
 ```bash
-# Backend: 50 tests (Jest + Supertest), run against the real Express app
+# Backend: 61 tests (Jest + Supertest), run against the real Express app
 # with a mocked Prisma client and a mocked categorizationService. A handful
 # of these spin up a real (in-process, no external network) Socket.IO
 # server + client to exercise realtimeService's auth and room logic directly.
 cd server
 npm test
 
-# Frontend: 50 tests (Vitest + React Testing Library), with the API
+# Frontend: 52 tests (Vitest + React Testing Library), with the API
 # client, AuthContext, and the realtime socket mocked
 cd client
 npm test
@@ -249,7 +250,7 @@ npm test
 6 tables:
 
 ```
-users            (id, name, email, password_hash, created_at)
+users            (id, name, username, email, password_hash, created_at)
 groups           (id, name, created_by, is_finalized, created_at)
 group_members    (group_id, user_id, joined_at)
 expenses         (id, group_id, paid_by, amount, description, category, date, created_at)

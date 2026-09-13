@@ -5,7 +5,7 @@ const request = require("supertest");
 
 jest.mock("../config/prisma", () => ({
   groupMember: { findUnique: jest.fn(), findMany: jest.fn(), createMany: jest.fn() },
-  group: { update: jest.fn(), findUnique: jest.fn() },
+  group: { update: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
   user: { findMany: jest.fn() },
 }));
 
@@ -58,43 +58,97 @@ describe("PATCH /api/groups/:id/finalize", () => {
   });
 });
 
+describe("POST /api/groups", () => {
+  test("resolves invited members by email or username in one call", async () => {
+    prisma.user.findMany.mockResolvedValue([
+      { id: 2, email: "b@x.com", username: "bob" },
+      { id: 3, email: "carol@x.com", username: "carol123" },
+    ]);
+    prisma.group.create.mockResolvedValue({ id: 10, name: "Trip", members: [] });
+
+    const res = await request(app)
+      .post("/api/groups")
+      .set(AUTH)
+      .send({ name: "Trip", memberIdentifiers: ["b@x.com", "carol123"] });
+
+    expect(res.status).toBe(201);
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { OR: [{ email: { in: ["b@x.com", "carol123"] } }, { username: { in: ["b@x.com", "carol123"] } }] },
+    });
+    expect(res.body.unmatchedIdentifiers).toEqual([]);
+  });
+
+  test("reports an identifier that doesn't match any registered user's email or username", async () => {
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.group.create.mockResolvedValue({ id: 10, name: "Trip", members: [] });
+
+    const res = await request(app)
+      .post("/api/groups")
+      .set(AUTH)
+      .send({ name: "Trip", memberIdentifiers: ["nobody"] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.unmatchedIdentifiers).toEqual(["nobody"]);
+  });
+});
+
 describe("POST /api/groups/:id/members", () => {
   test("adds a new member by email", async () => {
     prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
     prisma.group.findUnique
       .mockResolvedValueOnce({ isFinalized: false }) // assertGroupNotFinalized
       .mockResolvedValueOnce({ id: 10, name: "Trip", members: [] }); // final refetch
-    prisma.user.findMany.mockResolvedValue([{ id: 2, email: "b@x.com" }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 2, email: "b@x.com", username: "bob" }]);
     prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
 
     const res = await request(app)
       .post("/api/groups/10/members")
       .set(AUTH)
-      .send({ memberEmails: ["b@x.com"] });
+      .send({ memberIdentifiers: ["b@x.com"] });
 
     expect(res.status).toBe(200);
     expect(prisma.groupMember.createMany).toHaveBeenCalledWith({
       data: [{ groupId: 10, userId: 2 }],
     });
-    expect(res.body.unmatchedEmails).toEqual([]);
+    expect(res.body.unmatchedIdentifiers).toEqual([]);
   });
 
-  test("reports emails that don't match a registered user", async () => {
+  test("adds a new member by username instead of email", async () => {
     prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
     prisma.group.findUnique
       .mockResolvedValueOnce({ isFinalized: false })
       .mockResolvedValueOnce({ id: 10, name: "Trip", members: [] });
-    prisma.user.findMany.mockResolvedValue([]); // nobody registered with that email
+    prisma.user.findMany.mockResolvedValue([{ id: 2, email: "b@x.com", username: "bob" }]);
     prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
 
     const res = await request(app)
       .post("/api/groups/10/members")
       .set(AUTH)
-      .send({ memberEmails: ["nobody@x.com"] });
+      .send({ memberIdentifiers: ["bob"] });
+
+    expect(res.status).toBe(200);
+    expect(prisma.groupMember.createMany).toHaveBeenCalledWith({
+      data: [{ groupId: 10, userId: 2 }],
+    });
+    expect(res.body.unmatchedIdentifiers).toEqual([]);
+  });
+
+  test("reports identifiers that don't match a registered user", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.group.findUnique
+      .mockResolvedValueOnce({ isFinalized: false })
+      .mockResolvedValueOnce({ id: 10, name: "Trip", members: [] });
+    prisma.user.findMany.mockResolvedValue([]); // nobody registered with that email/username
+    prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
+
+    const res = await request(app)
+      .post("/api/groups/10/members")
+      .set(AUTH)
+      .send({ memberIdentifiers: ["nobody@x.com"] });
 
     expect(res.status).toBe(200);
     expect(prisma.groupMember.createMany).not.toHaveBeenCalled();
-    expect(res.body.unmatchedEmails).toEqual(["nobody@x.com"]);
+    expect(res.body.unmatchedIdentifiers).toEqual(["nobody@x.com"]);
   });
 
   test("skips a user who is already a member instead of erroring", async () => {
@@ -102,17 +156,17 @@ describe("POST /api/groups/:id/members", () => {
     prisma.group.findUnique
       .mockResolvedValueOnce({ isFinalized: false })
       .mockResolvedValueOnce({ id: 10, name: "Trip", members: [] });
-    prisma.user.findMany.mockResolvedValue([{ id: 2, email: "already@x.com" }]);
+    prisma.user.findMany.mockResolvedValue([{ id: 2, email: "already@x.com", username: "already" }]);
     prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }, { userId: 2 }]);
 
     const res = await request(app)
       .post("/api/groups/10/members")
       .set(AUTH)
-      .send({ memberEmails: ["already@x.com"] });
+      .send({ memberIdentifiers: ["already@x.com"] });
 
     expect(res.status).toBe(200);
     expect(prisma.groupMember.createMany).not.toHaveBeenCalled();
-    expect(res.body.unmatchedEmails).toEqual([]); // matched a real user, just already in the group
+    expect(res.body.unmatchedIdentifiers).toEqual([]); // matched a real user, just already in the group
   });
 
   test("rejects a non-member of the group", async () => {
@@ -121,7 +175,7 @@ describe("POST /api/groups/:id/members", () => {
     const res = await request(app)
       .post("/api/groups/10/members")
       .set(AUTH)
-      .send({ memberEmails: ["b@x.com"] });
+      .send({ memberIdentifiers: ["b@x.com"] });
 
     expect(res.status).toBe(403);
     expect(prisma.groupMember.createMany).not.toHaveBeenCalled();
@@ -134,16 +188,16 @@ describe("POST /api/groups/:id/members", () => {
     const res = await request(app)
       .post("/api/groups/10/members")
       .set(AUTH)
-      .send({ memberEmails: ["b@x.com"] });
+      .send({ memberIdentifiers: ["b@x.com"] });
 
     expect(res.status).toBe(400);
     expect(prisma.groupMember.createMany).not.toHaveBeenCalled();
   });
 
-  test("rejects an empty memberEmails array", async () => {
+  test("rejects an empty memberIdentifiers array", async () => {
     prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
 
-    const res = await request(app).post("/api/groups/10/members").set(AUTH).send({ memberEmails: [] });
+    const res = await request(app).post("/api/groups/10/members").set(AUTH).send({ memberIdentifiers: [] });
 
     expect(res.status).toBe(400);
   });

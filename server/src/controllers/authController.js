@@ -6,8 +6,15 @@ const { ApiError } = require("../middleware/errorHandler");
 
 const SALT_ROUNDS = 10;
 
+// Letters, digits, underscores only - keeps it safe to display and to type
+// into the "add member" field without any quoting/escaping concerns.
+const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+
 const signupSchema = z.object({
   name: z.string().min(1),
+  username: z
+    .string()
+    .regex(USERNAME_RE, "Username must be 3-20 characters: letters, numbers, and underscores only"),
   email: z.string().email(),
   password: z.string().min(8),
 });
@@ -23,20 +30,27 @@ function generateToken(userId) {
 
 async function signup(req, res, next) {
   try {
-    const { name, email, password } = signupSchema.parse(req.body);
+    const { name, username, email, password } = signupSchema.parse(req.body);
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw new ApiError(409, "An account with this email already exists");
+    const existing = await prisma.user.findFirst({
+      where: { OR: [{ email }, { username }] },
+    });
+    if (existing) {
+      throw new ApiError(
+        409,
+        existing.email === email ? "An account with this email already exists" : "That username is taken"
+      );
+    }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const user = await prisma.user.create({
-      data: { name, email, passwordHash },
+      data: { name, username, email, passwordHash },
     });
 
     const token = generateToken(user.id);
     res.status(201).json({
       token,
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, username: user.username, email: user.email },
     });
   } catch (err) {
     next(err);
@@ -56,7 +70,7 @@ async function login(req, res, next) {
     const token = generateToken(user.id);
     res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, username: user.username, email: user.email },
     });
   } catch (err) {
     next(err);
