@@ -261,7 +261,42 @@ See `server/prisma/schema.prisma` for the full schema.
 
 ## 🗺️ Roadmap
 - [x] WebSocket-based real-time updates
-- [ ] Receipt OCR to auto-fill expense amounts
+- [ ] Choose who an expense splits between when adding it - equal splits
+  currently always divide across every group member with no way to exclude
+  someone (exact/percentage splits can informally exclude someone by leaving
+  their amount blank, but there's no explicit member-picker for any split
+  type)
+- [ ] Settle up a custom (partial) amount - settling currently always pays
+  off a balance in full; there's no way to record a partial payment toward
+  what you owe someone
+- [ ] Per-person balances on the dashboard - the main page currently only
+  shows spending totals and a group list, with no rollup of how much you
+  owe (or are owed by) each specific person across all your shared groups
+- [ ] Natural-language expense entry - type "Dinner at Nobu, $120, split
+  with Alice and Bob" into a single text box and have Cohere parse it into
+  the structured `{description, amount, splits}` the add-expense form
+  already expects, pre-filling it for you to confirm
+- [ ] A conversational balances/insights assistant - ask "how much did I
+  spend on food this month?" or "who do I owe the most right now?" in a
+  chat box on the dashboard; a genuine tool-calling agent rather than a
+  single completion, since it needs to decide which existing service
+  (`getGroupBalances`, the insights aggregation utils, expense history) to
+  query based on the question
+- [ ] Smart settle-up nudges - reuse `simplifyDebts.js`'s output to
+  proactively suggest who should settle up next, phrased in plain language
+  ("Alice and Bob settling up clears 2 of the 3 outstanding debts") rather
+  than just listing raw balances; would also give the "Email notifications"
+  item below actual content worth sending instead of a plain transactional
+  email
+- [ ] Receipt OCR with multi-step line-item splitting - beyond just
+  extracting a total, have a vision-capable model read individual line
+  items off a photographed receipt and propose a per-item split ("shared
+  appetizer split three ways, entrees individually?") for you to confirm or
+  edit - extract → interpret → propose → confirm, a genuinely agentic flow
+  rather than one completion
+- [ ] Duplicate-expense detection - flag a newly-added expense that looks
+  like an accidental double-entry of a recent one (similar description,
+  amount, and date)
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
 - [ ] Password reset flow - there's currently no way back into an account
