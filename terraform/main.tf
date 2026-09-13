@@ -92,6 +92,35 @@ resource "aws_security_group" "app" {
   tags = { Name = "splitfinance-app" }
 }
 
+# Lets AWS Systems Manager run commands on the instance (used by the GitHub
+# Actions deploy job) without ever needing an open SSH port reachable from
+# CI - SSM's control-plane traffic goes out over the instance's normal
+# internet egress (already unrestricted in the security group above), not
+# through any inbound port. The Canonical Ubuntu AMI ships with the SSM
+# agent pre-installed and running, so attaching this role is the only setup
+# needed.
+resource "aws_iam_role" "ec2_ssm" {
+  name = "splitfinance-ec2-ssm"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ec2_ssm" {
+  role       = aws_iam_role.ec2_ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "ec2_ssm" {
+  name = "splitfinance-ec2-ssm"
+  role = aws_iam_role.ec2_ssm.name
+}
+
 # Allocated standalone (not instance-associated yet) so its address is known
 # before the instance exists - the instance's own boot script needs to bake
 # this address into CLIENT_URL/VITE_API_URL, which would otherwise be a
@@ -107,6 +136,7 @@ resource "aws_instance" "app" {
   key_name               = aws_key_pair.deploy.key_name
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.app.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_ssm.name
 
   root_block_device {
     volume_size = 20 # gp3, still within the AWS free tier's 30GB-month

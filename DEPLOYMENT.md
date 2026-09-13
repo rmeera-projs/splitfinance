@@ -106,28 +106,43 @@ above) with no GitHub Actions setup needed.
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend
 (Jest) and frontend (Vitest + build) tests on every push and pull request to
 `main`. On a **push** to `main` - i.e. after a PR merges - and only if both
-test jobs pass, a third job SSHes into the EC2 instance and runs the same
-update you'd otherwise do by hand: pull the latest code and
-`docker compose up -d --build`.
+test jobs pass, a third job deploys via **AWS Systems Manager**: it runs the
+same update you'd otherwise do by hand (pull the latest code,
+`docker compose up -d --build`) as a command sent to the instance through
+AWS's API, not over SSH.
+
+This is deliberate, not incidental: the instance's security group only
+allows SSH from one trusted IP (`allowed_ssh_cidr` in
+`terraform/variables.tf`) - a GitHub-hosted runner's IP changes on every run
+and will never match it, so an SSH-based deploy step would always fail at
+the network level regardless of any secret. SSM sidesteps this entirely -
+no inbound port needs to open for it, ever. This works because
+`terraform/main.tf` attaches an IAM role
+(`aws_iam_instance_profile.ec2_ssm`) to the instance with the
+`AmazonSSMManagedInstanceCore` policy, and the Canonical Ubuntu AMI ships
+with the SSM agent already installed and running.
 
 To turn the deploy job on, add two repository secrets (**Settings → Secrets
-and variables → Actions → New repository secret**):
+and variables → Actions → New repository secret**) - the same AWS access
+key you used for `aws configure` when setting up Terraform:
 
 | Secret | Value |
 |---|---|
-| `EC2_HOST` | The instance's Elastic IP. Get it from `cd terraform && terraform output app_url` and take just the IP (e.g. `52.204.206.225` out of `http://52.204.206.225:5173`) |
-| `EC2_SSH_KEY` | The full contents of `terraform/splitfinance-key.pem` - the private key Terraform generated for you - including the `-----BEGIN...-----` / `-----END...-----` lines |
+| `AWS_ACCESS_KEY_ID` | Your IAM user's access key ID |
+| `AWS_SECRET_ACCESS_KEY` | Your IAM user's secret access key |
 
 Both values are sensitive - paste them directly into GitHub's secret form,
-never into a commit, a PR description, or chat. `splitfinance-key.pem` is
-already gitignored, so there's nothing to clean up locally.
+never into a commit, a PR description, or chat. The workflow looks up the
+instance by its `Name=splitfinance-app` tag at deploy time, so there's no
+host/IP secret to keep in sync if the instance is ever replaced.
 
-Without these two secrets set, the `deploy` job simply fails (its SSH step
-has nothing to connect with) while `backend`/`frontend` still run
+Without these two secrets set, the `deploy` job simply fails (nothing to
+authenticate to AWS with) while `backend`/`frontend` still run
 normally - CI keeps working as pure CI until you're ready to turn on
 auto-deploy.
 
 Once both secrets are set, every merge to `main` deploys automatically -
-check progress under the repo's **Actions** tab. Manual deploys (the SSH
-commands used earlier in this project) still work fine alongside this; the
-workflow is just automating that same process.
+check progress under the repo's **Actions** tab. Manual deploys (SSH still
+works fine for troubleshooting, using `terraform/splitfinance-key.pem` from
+your own trusted IP) work alongside this; the workflow just automates the
+routine case.
