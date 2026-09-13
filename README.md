@@ -143,7 +143,7 @@ insights) - see `server/src/routes/`.
 | AI | Cohere Chat API (expense auto-categorization) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 | Infra | Docker Compose |
-| CI/CD | GitHub Actions (test on every PR, auto-deploy to AWS on merge) |
+| CI/CD | GitHub Actions (test on every PR, auto-deploy to AWS via SSM on merge) |
 
 ## 🚀 Getting Started
 
@@ -216,8 +216,10 @@ down.
 ### CI/CD
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend and
 frontend tests (plus a frontend build) on every push/PR to `main`. On a push
-to `main`, once both test jobs pass, it also SSHes into the AWS EC2 instance
-and redeploys automatically - see [DEPLOYMENT.md](DEPLOYMENT.md#continuous-deployment-via-github-actions-aws-only)
+to `main`, once both test jobs pass, it also redeploys the AWS EC2 instance
+automatically - via AWS Systems Manager, not SSH, since the instance's
+security group intentionally only allows SSH from one trusted IP that a
+GitHub-hosted runner could never match. See [DEPLOYMENT.md](DEPLOYMENT.md#continuous-deployment-via-github-actions-aws-only)
 for the two repo secrets it needs. Railway's own auto-deploy-on-push (see
 above) doesn't go through this workflow at all.
 
