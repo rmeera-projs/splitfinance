@@ -25,6 +25,7 @@ services:
       CLIENT_URL: http://localhost:5173
       COHERE_API_KEY: ${COHERE_API_KEY:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_ADDRESS: ${RESEND_FROM_ADDRESS:-}
     ports:
       - "5000:5000"
 

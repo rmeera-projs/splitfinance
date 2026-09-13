@@ -40,6 +40,7 @@ cd /opt/splitfinance
 cat > .env <<EOF
 COHERE_API_KEY=${cohere_api_key}
 RESEND_API_KEY=${resend_api_key}
+RESEND_FROM_ADDRESS=${resend_from_address}
 EOF
 
 # CLIENT_URL/JWT_SECRET/VITE_API_URL are hardcoded literals in the base

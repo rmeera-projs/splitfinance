@@ -36,6 +36,7 @@ start; Railway is usage-based after that (no fixed monthly minimum).
    | `JWT_SECRET` | A long random string - generate one with `openssl rand -base64 32` **on your own machine** and paste the result; don't reuse any example value you've seen in chat or docs |
    | `COHERE_API_KEY` | Your Cohere key (optional - omit it and auto-categorization just falls back to "Other") |
    | `RESEND_API_KEY` | Your Resend key (optional - omit it and password reset links are only logged server-side instead of emailed, so "forgot password" won't actually reach real users until this is set) |
+   | `RESEND_FROM_ADDRESS` | Optional - once a domain is verified in Resend, set this to an address on it, e.g. `SplitFinance <noreply@splitfinance.org>`. Omit it and emails send from `onboarding@resend.dev` instead, which works but isn't meant for production. |
    | `CLIENT_URL` | Leave unset for now - you'll come back and set this in step 4 once the frontend has a URL |
 4. **Settings → Networking → Generate Domain** to get a public URL like
    `https://splitfinance-server-production.up.railway.app`. Copy it - the

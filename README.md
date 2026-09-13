@@ -228,6 +228,14 @@ reset link is only logged to the server's console instead of emailed,
 which is enough to test the flow locally. No key is needed to run the test
 suite; Resend is fully mocked in tests.
 
+Once a domain is verified in Resend (Domains tab in its dashboard — add
+the DKIM/SPF/MX records it gives you at your DNS provider), set
+`RESEND_FROM_ADDRESS` too so emails send from that domain instead of the
+shared `onboarding@resend.dev` testing address:
+```
+RESEND_FROM_ADDRESS="SplitFinance <noreply@yourdomain.com>"
+```
+
 ### Run everything with Docker
 ```bash
 docker-compose up --build
@@ -239,8 +247,10 @@ root** (not `server/.env`) instead:
 ```
 COHERE_API_KEY="your-key-here"
 RESEND_API_KEY="your-key-here"
+RESEND_FROM_ADDRESS="SplitFinance <noreply@yourdomain.com>"
 ```
-`docker-compose.yml` picks them up via `${COHERE_API_KEY}`/`${RESEND_API_KEY}`
+`docker-compose.yml` picks them up via
+`${COHERE_API_KEY}`/`${RESEND_API_KEY}`/`${RESEND_FROM_ADDRESS}`
 substitution. This root `.env` is git-ignored, same as `server/.env`.
 
 ## 🚢 Deploying for real

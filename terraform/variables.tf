@@ -29,6 +29,12 @@ variable "resend_api_key" {
   sensitive   = true
 }
 
+variable "resend_from_address" {
+  description = "\"From\" address for password reset emails, e.g. \"SplitFinance <noreply@splitfinance.org>\". Optional - requires a domain verified in Resend; leave empty and emails send from the shared onboarding@resend.dev testing address instead."
+  type        = string
+  default     = ""
+}
+
 variable "repo_url" {
   description = "Git URL the instance clones on boot."
   type        = string

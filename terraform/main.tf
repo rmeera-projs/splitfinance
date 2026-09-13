@@ -144,12 +144,13 @@ resource "aws_instance" "app" {
   }
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    eip_address     = aws_eip.app.public_ip
-    jwt_secret      = random_password.jwt_secret.result
-    cohere_api_key  = var.cohere_api_key
-    resend_api_key  = var.resend_api_key
-    repo_url        = var.repo_url
-    repo_branch     = var.repo_branch
+    eip_address         = aws_eip.app.public_ip
+    jwt_secret          = random_password.jwt_secret.result
+    cohere_api_key      = var.cohere_api_key
+    resend_api_key      = var.resend_api_key
+    resend_from_address = var.resend_from_address
+    repo_url            = var.repo_url
+    repo_branch         = var.repo_branch
   })
   # Re-run the boot script (and thus redeploy) whenever these inputs change.
   user_data_replace_on_change = true
