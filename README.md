@@ -266,6 +266,12 @@ See `server/prisma/schema.prisma` for the full schema.
   someone (exact/percentage splits can informally exclude someone by leaving
   their amount blank, but there's no explicit member-picker for any split
   type)
+- [ ] Settle up a custom (partial) amount - settling currently always pays
+  off a balance in full; there's no way to record a partial payment toward
+  what you owe someone
+- [ ] Per-person balances on the dashboard - the main page currently only
+  shows spending totals and a group list, with no rollup of how much you
+  owe (or are owed by) each specific person across all your shared groups
 - [ ] Receipt OCR to auto-fill expense amounts
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
