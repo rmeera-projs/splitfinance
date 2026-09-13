@@ -3,6 +3,8 @@
 A full-stack expense-splitting application that lets groups of people track shared
 expenses and settle up with the minimum number of payments.
 
+🔗 **Live at [splitfinance.org](https://splitfinance.org)** (API: [api.splitfinance.org](https://api.splitfinance.org/health))
+
 ## ✨ Features
 
 - **Auth** — JWT-based signup/login with hashed passwords; every account has
@@ -172,7 +174,7 @@ insights) - see `server/src/routes/`.
 | Real-time | Socket.IO (live group activity notices) |
 | AI | Cohere Chat API (expense auto-categorization) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
-| Infra | Docker Compose |
+| Infra | Docker Compose, Caddy (reverse proxy + automatic HTTPS) |
 | CI/CD | GitHub Actions (test on every PR, auto-deploy to AWS via SSM on merge) |
 
 ## 🚀 Getting Started
@@ -266,7 +268,29 @@ Docker, clones this repo, and runs `docker compose up --build` - no Railway
 account needed. See the comments in `terraform/main.tf` and
 `terraform/variables.tf` to get started (`terraform init`, `terraform plan
 -out=tfplan`, `terraform apply "tfplan"`); `terraform destroy` tears it back
-down.
+down. **This is what's actually running the live deploy** at
+https://splitfinance.org.
+
+A few things the AWS setup adds beyond the bare instance:
+- **HTTPS via Caddy** - a Caddy reverse proxy container gets automatic
+  Let's Encrypt certs for `domain_name`/`api_domain_name` (set in
+  `terraform/variables.tf` or `terraform.tfvars`; default
+  `splitfinance.org`/`api.splitfinance.org`) as long as their DNS A
+  records already point at the instance's Elastic IP before it boots.
+  The raw `http://<elastic-ip>:5173` / `:5000` URLs (this repo's
+  `direct_app_url`/`direct_api_url` Terraform outputs) still work as a
+  plaintext debugging fallback, e.g. during DNS cutover - but they're
+  restricted to `allowed_ssh_cidr` in the security group, not open to the
+  public internet, since anyone hitting them directly would be submitting
+  login/signup credentials unencrypted.
+- **A persistent Postgres volume** - database data lives on a separate
+  EBS volume (`aws_ebs_volume.postgres_data`), not the instance's own
+  root disk. This matters because `user_data_replace_on_change = true`
+  means nearly any config change replaces the instance outright, which
+  destroys its root volume - without a separate volume, that would
+  silently wipe every user account on every `terraform apply`. The
+  volume has `prevent_destroy` set, so removing it from config takes a
+  deliberate extra step rather than an accidental `terraform apply`.
 
 ### CI/CD
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend and

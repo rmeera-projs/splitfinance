@@ -16,6 +16,13 @@ data "aws_subnets" "default" {
   }
 }
 
+# EBS volumes must live in the same AZ as whatever they attach to - looked
+# up here so aws_ebs_volume.postgres_data below can match the instance's AZ
+# without a dependency cycle (the instance doesn't exist yet at plan time).
+data "aws_subnet" "selected" {
+  id = data.aws_subnets.default.ids[0]
+}
+
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -66,18 +73,39 @@ resource "aws_security_group" "app" {
     cidr_blocks = [var.allowed_ssh_cidr]
   }
 
+  # Restricted to the same trusted IP as SSH, not the public internet - now
+  # that Caddy/HTTPS (below) fronts both apps, these direct ports only
+  # exist as a debugging fallback for whoever runs `terraform apply`.
+  # Publicly open, they'd let anyone submit login/signup credentials in
+  # plaintext, bypassing the TLS this project otherwise provides.
   ingress {
-    description = "Frontend (Vite dev server)"
+    description = "Frontend (Vite dev server) - direct access for debugging only"
     from_port   = 5173
     to_port     = 5173
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_ssh_cidr]
+  }
+
+  ingress {
+    description = "Backend API - direct access for debugging only"
+    from_port   = 5000
+    to_port     = 5000
+    protocol    = "tcp"
+    cidr_blocks = [var.allowed_ssh_cidr]
+  }
+
+  ingress {
+    description = "HTTP (Caddy - ACME challenge + redirect to HTTPS)"
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description = "Backend API"
-    from_port   = 5000
-    to_port     = 5000
+    description = "HTTPS (Caddy)"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -130,6 +158,40 @@ resource "aws_eip" "app" {
   tags   = { Name = "splitfinance-app" }
 }
 
+# Postgres's data lives here, not on the instance's own root volume - the
+# root volume is deleted every time the instance is replaced (which
+# user_data_replace_on_change triggers on nearly any config change), which
+# would otherwise wipe every user account each time. This volume is a
+# separate resource with its own lifecycle, reattached to whichever
+# instance exists via aws_volume_attachment below.
+#
+# prevent_destroy is a deliberate guardrail: removing this resource from
+# config (or renaming it) would normally make Terraform destroy it exactly
+# like the disposable root volume it's meant to be independent from. If
+# this ever needs to be actually destroyed, that has to be a deliberate,
+# separate step (temporarily drop this block or use -target), never a side
+# effect of an unrelated change.
+resource "aws_ebs_volume" "postgres_data" {
+  availability_zone = data.aws_subnet.selected.availability_zone
+  size              = var.postgres_volume_size_gb
+  type              = "gp3"
+  tags              = { Name = "splitfinance-postgres-data" }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_volume_attachment" "postgres_data" {
+  # AWS honors this as a hint, not a guarantee - t3 instances are
+  # Nitro-based, so the volume actually shows up to the OS as an NVMe
+  # device, not literally /dev/sdf. user_data.sh.tpl finds the real device
+  # via the stable /dev/disk/by-id symlink AWS derives from the volume ID.
+  device_name = "/dev/sdf"
+  volume_id   = aws_ebs_volume.postgres_data.id
+  instance_id = aws_instance.app.id
+}
+
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -149,6 +211,9 @@ resource "aws_instance" "app" {
     cohere_api_key      = var.cohere_api_key
     resend_api_key      = var.resend_api_key
     resend_from_address = var.resend_from_address
+    domain_name         = var.domain_name
+    api_domain_name     = var.api_domain_name
+    postgres_volume_id  = aws_ebs_volume.postgres_data.id
     repo_url            = var.repo_url
     repo_branch         = var.repo_branch
   })

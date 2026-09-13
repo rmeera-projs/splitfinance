@@ -35,6 +35,24 @@ variable "resend_from_address" {
   default     = ""
 }
 
+variable "postgres_volume_size_gb" {
+  description = "Size in GB of the separate, persistent EBS volume Postgres data lives on (independent of the instance's own root volume, which gets destroyed on every instance replacement)."
+  type        = number
+  default     = 10
+}
+
+variable "domain_name" {
+  description = "Domain the frontend is served on over HTTPS (via the Caddy reverse proxy). Must have an A record pointing at this instance's Elastic IP before boot, or Caddy's automatic Let's Encrypt cert issuance will fail its ACME challenge and retry until it does."
+  type        = string
+  default     = "splitfinance.org"
+}
+
+variable "api_domain_name" {
+  description = "Domain the backend API is served on over HTTPS (via the Caddy reverse proxy). Same DNS requirement as domain_name."
+  type        = string
+  default     = "api.splitfinance.org"
+}
+
 variable "repo_url" {
   description = "Git URL the instance clones on boot."
   type        = string

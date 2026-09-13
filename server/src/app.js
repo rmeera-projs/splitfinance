@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 
 const authRoutes = require("./routes/authRoutes");
 const groupRoutes = require("./routes/groupRoutes");
@@ -10,6 +11,13 @@ const { errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
 
+// contentSecurityPolicy/crossOriginEmbedderPolicy are for server-rendered
+// HTML with inline scripts/embedded resources - this is a pure JSON API (the
+// frontend is a separate app, served by Caddy), so both are off rather than
+// fighting a CSP that has nothing to actually apply to. Everything else
+// helmet sets by default still applies: HSTS, X-Content-Type-Options,
+// X-Frame-Options, and turning off the X-Powered-By: Express header.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
 app.use(express.json());
 

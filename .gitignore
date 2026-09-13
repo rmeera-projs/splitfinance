@@ -7,6 +7,9 @@ build/
 *.log
 .DS_Store
 
+# Claude Code - personal permission overrides, not meant to be shared/committed.
+.claude/settings.local.json
+
 # Terraform - state and generated secrets never belong in git.
 # terraform.lock.hcl (provider version lockfile) is intentionally NOT
 # ignored - that one should be committed, like package-lock.json.
