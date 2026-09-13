@@ -46,9 +46,11 @@ export default function GroupPage() {
   const [memberError, setMemberError] = useState("");
 
   // Set when a socket "group-activity" event arrives for this group from
-  // someone else - shown as a dismissable banner rather than silently
-  // refetching, so an in-progress edit/add form is never yanked out from
-  // under the person using it.
+  // someone else - shown as a dismissable banner naming what changed. The
+  // group itself is refetched immediately (see handleActivity below), so
+  // the banner is purely informational, not a prompt to act; add/edit form
+  // fields are separate local state, not derived from `group`, so a
+  // refetch while one is open doesn't disturb it.
   const [activityNotice, setActivityNotice] = useState(null);
 
   useEffect(() => {
@@ -73,6 +75,7 @@ export default function GroupPage() {
       // fresh data from the API response that triggered it.
       if (payload.actorId === user.id) return;
       setActivityNotice(payload);
+      fetchGroup();
     }
 
     socket.on("group-activity", handleActivity);
@@ -301,11 +304,6 @@ export default function GroupPage() {
     return group.members.find((m) => m.user.id === userId)?.user.name || "Unknown";
   }
 
-  function refreshFromNotice() {
-    setActivityNotice(null);
-    fetchGroup();
-  }
-
   if (!group) return null;
 
   return (
@@ -333,21 +331,15 @@ export default function GroupPage() {
       {activityNotice && (
         <div className="mb-6 flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded px-3 py-2">
           <span>
-            {nameFor(activityNotice.actorId)}{" "}
-            {ACTIVITY_MESSAGES[activityNotice.type] || "made a change"} - refresh to see it.
+            {nameFor(activityNotice.actorId)} {ACTIVITY_MESSAGES[activityNotice.type] || "made a change"}.
           </span>
-          <div className="flex gap-3 shrink-0">
-            <button onClick={refreshFromNotice} className="font-medium hover:underline">
-              Refresh
-            </button>
-            <button
-              onClick={() => setActivityNotice(null)}
-              aria-label="Dismiss"
-              className="text-amber-500 hover:text-amber-700"
-            >
-              ✕
-            </button>
-          </div>
+          <button
+            onClick={() => setActivityNotice(null)}
+            aria-label="Dismiss"
+            className="text-amber-500 hover:text-amber-700 shrink-0"
+          >
+            ✕
+          </button>
         </div>
       )}
 

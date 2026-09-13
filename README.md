@@ -35,8 +35,8 @@ expenses and settle up with the minimum number of payments.
 - **Activity Feed** — chronological log of expenses and settlements per group
 - **Live Updates** — a WebSocket notice tells you when someone else changes a
   group you're viewing (new/edited/deleted expense, settlement, finalize/
-  reopen, new member), with a one-click refresh rather than an unprompted
-  page change
+  reopen, new member); the page refreshes itself automatically, with a
+  dismissable banner naming who did what
 
 ## 🧠 The Interesting Part: Debt Simplification
 
@@ -111,13 +111,14 @@ Group pages stay current across everyone viewing them via
 - Every mutating endpoint (add/edit/delete an expense, change its category,
   record a settlement, finalize/reopen, add a member) broadcasts a
   lightweight `{ type, actorId }` notice to the room after it succeeds - the
-  socket event is a "something changed, you may want to refresh" signal, not
-  the changed data itself, so there's one source of truth (the REST API) for
-  what's actually current
-- The client shows this as a dismissable banner ("Bob added an expense -
-  refresh to see it") rather than silently refetching - an unprompted data
-  swap could yank an in-progress add/edit form out from under whoever's
-  looking at the page
+  socket event is a "something changed" signal, not the changed data
+  itself, so there's one source of truth (the REST API) for what's
+  actually current
+- The client refetches the group immediately on receiving this notice, and
+  shows a dismissable banner ("Bob added an expense") alongside it - the
+  refetch is safe to do unprompted because add/edit form fields are their
+  own local state, not derived from the fetched group data, so an
+  in-progress form is never disturbed by it
 - A user's own actions never trigger their own banner (the page already has
   the fresh data from the API response that caused the change)
 - Auth happens in Socket.IO's handshake middleware (same JWT as the REST

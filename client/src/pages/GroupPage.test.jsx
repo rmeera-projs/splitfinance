@@ -459,10 +459,12 @@ describe("GroupPage - live activity notice", () => {
 
     renderGroupPage();
     await screen.findByText("Ski Trip");
+    api.get.mockClear();
 
     triggerActivity({ groupId: 7, type: "expense-added", actorId: ME.id });
 
     expect(screen.queryByText(/added an expense/i)).not.toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalled();
   });
 
   test("ignores activity for a different group", async () => {
@@ -470,14 +472,15 @@ describe("GroupPage - live activity notice", () => {
 
     renderGroupPage();
     await screen.findByText("Ski Trip");
+    api.get.mockClear();
 
     triggerActivity({ groupId: 999, type: "expense-added", actorId: OTHER.id });
 
     expect(screen.queryByText(/added an expense/i)).not.toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalled();
   });
 
-  test("clicking Refresh on the banner refetches the group and dismisses it", async () => {
-    const user = userEvent.setup();
+  test("refetches the group automatically as soon as the activity notice arrives, no click needed", async () => {
     mockGroupResponse({ data: baseGroup() });
 
     renderGroupPage();
@@ -485,25 +488,25 @@ describe("GroupPage - live activity notice", () => {
     api.get.mockClear();
 
     triggerActivity({ groupId: 7, type: "settlement", actorId: OTHER.id });
-    await screen.findByText(/recorded a settlement/i);
 
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
-
+    // The banner and the refetch both happen off the same event - neither
+    // waits on the other, and there's no "Refresh" button to click.
+    expect(await screen.findByText(/recorded a settlement/i)).toBeInTheDocument();
     await waitFor(() => expect(api.get).toHaveBeenCalledWith("/groups/7"));
-    expect(screen.queryByText(/recorded a settlement/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh" })).not.toBeInTheDocument();
   });
 
-  test("dismissing the banner hides it without refetching", async () => {
+  test("dismissing the banner hides it without an extra refetch", async () => {
     const user = userEvent.setup();
     mockGroupResponse({ data: baseGroup() });
 
     renderGroupPage();
     await screen.findByText("Ski Trip");
-    api.get.mockClear();
 
     triggerActivity({ groupId: 7, type: "member-added", actorId: OTHER.id });
     await screen.findByText(/added a member/i);
 
+    api.get.mockClear();
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(screen.queryByText(/added a member/i)).not.toBeInTheDocument();
