@@ -143,6 +143,7 @@ insights) - see `server/src/routes/`.
 | AI | Cohere Chat API (expense auto-categorization) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 | Infra | Docker Compose |
+| CI/CD | GitHub Actions (test on every PR, auto-deploy to AWS on merge) |
 
 ## 🚀 Getting Started
 
@@ -211,6 +212,14 @@ account needed. See the comments in `terraform/main.tf` and
 `terraform/variables.tf` to get started (`terraform init`, `terraform plan
 -out=tfplan`, `terraform apply "tfplan"`); `terraform destroy` tears it back
 down.
+
+### CI/CD
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend and
+frontend tests (plus a frontend build) on every push/PR to `main`. On a push
+to `main`, once both test jobs pass, it also SSHes into the AWS EC2 instance
+and redeploys automatically - see [DEPLOYMENT.md](DEPLOYMENT.md#continuous-deployment-via-github-actions-aws-only)
+for the two repo secrets it needs. Railway's own auto-deploy-on-push (see
+above) doesn't go through this workflow at all.
 
 ## 🧪 Testing
 

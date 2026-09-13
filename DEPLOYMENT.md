@@ -96,3 +96,38 @@ changes, everything ships automatically. The one exception is
 `VITE_API_URL`: because it's baked in at build time, changing it requires a
 new frontend build, not just a redeploy of the existing one (Railway does
 this automatically on a redeploy, since a redeploy rebuilds the image).
+
+# Continuous Deployment via GitHub Actions (AWS only)
+
+This section only applies if you're running the [Terraform/AWS](terraform/)
+deployment instead of Railway - Railway already auto-deploys on push (see
+above) with no GitHub Actions setup needed.
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend
+(Jest) and frontend (Vitest + build) tests on every push and pull request to
+`main`. On a **push** to `main` - i.e. after a PR merges - and only if both
+test jobs pass, a third job SSHes into the EC2 instance and runs the same
+update you'd otherwise do by hand: pull the latest code and
+`docker compose up -d --build`.
+
+To turn the deploy job on, add two repository secrets (**Settings → Secrets
+and variables → Actions → New repository secret**):
+
+| Secret | Value |
+|---|---|
+| `EC2_HOST` | The instance's Elastic IP. Get it from `cd terraform && terraform output app_url` and take just the IP (e.g. `52.204.206.225` out of `http://52.204.206.225:5173`) |
+| `EC2_SSH_KEY` | The full contents of `terraform/splitfinance-key.pem` - the private key Terraform generated for you - including the `-----BEGIN...-----` / `-----END...-----` lines |
+
+Both values are sensitive - paste them directly into GitHub's secret form,
+never into a commit, a PR description, or chat. `splitfinance-key.pem` is
+already gitignored, so there's nothing to clean up locally.
+
+Without these two secrets set, the `deploy` job simply fails (its SSH step
+has nothing to connect with) while `backend`/`frontend` still run
+normally - CI keeps working as pure CI until you're ready to turn on
+auto-deploy.
+
+Once both secrets are set, every merge to `main` deploys automatically -
+check progress under the repo's **Actions** tab. Manual deploys (the SSH
+commands used earlier in this project) still work fine alongside this; the
+workflow is just automating that same process.
