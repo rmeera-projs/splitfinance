@@ -9,6 +9,9 @@ expenses and settle up with the minimum number of payments.
 
 - **Auth** — JWT-based signup/login with hashed passwords; every account has
   a unique username (letters, numbers, underscores) alongside its email
+- **Account Management** — a dedicated Account page (linked from the main
+  menu on every page) for updating your name, username, or email, and for
+  changing your password (requires the current one)
 - **Password Reset** — a self-service "forgot password" flow: request a
   link by email, click it, set a new password. Reset tokens are single-use,
   expire in 1 hour, and the request endpoint responds identically whether
@@ -161,8 +164,8 @@ splitfinance/
 ```
 
 ### API Surface
-16 REST endpoints across 5 resources (auth, groups, expenses, settlements,
-insights) - see `server/src/routes/`.
+19 REST endpoints across 6 resources (auth, users, groups, expenses,
+settlements, insights) - see `server/src/routes/`.
 
 ### Tech Stack
 | Layer | Choice |

@@ -5,6 +5,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { sendPasswordResetEmail } = require("../services/emailService");
+const { USERNAME_RE } = require("../utils/validators");
 
 const SALT_ROUNDS = 10;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -12,10 +13,6 @@ const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 function hashToken(rawToken) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
-
-// Letters, digits, underscores only - keeps it safe to display and to type
-// into the "add member" field without any quoting/escaping concerns.
-const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 
 const signupSchema = z.object({
   name: z.string().min(1),

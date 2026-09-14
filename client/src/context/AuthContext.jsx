@@ -44,8 +44,24 @@ export function AuthProvider({ children }) {
     await api.post("/auth/reset-password", { token, newPassword });
   }
 
+  // Updates localStorage/context with the server's response rather than
+  // the submitted fields directly - keeps this the single place that
+  // decides what "the current user" looks like after a change.
+  async function updateProfile(fields) {
+    const { data } = await api.patch("/users/me", fields);
+    localStorage.setItem("user", JSON.stringify(data));
+    setUser(data);
+    return data;
+  }
+
+  async function changePassword(currentPassword, newPassword) {
+    await api.patch("/users/me/password", { currentPassword, newPassword });
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, forgotPassword, resetPassword }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, signup, logout, forgotPassword, resetPassword, updateProfile, changePassword }}
+    >
       {children}
     </AuthContext.Provider>
   );

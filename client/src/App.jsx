@@ -1,16 +1,26 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import NavBar from "./components/NavBar";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import GroupPage from "./pages/GroupPage";
+import AccountPage from "./pages/AccountPage";
 
+// Renders the shared NavBar (the app's main menu) above every protected
+// page, rather than each page building its own account/logout controls.
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
-  return user ? children : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  return (
+    <>
+      <NavBar />
+      {children}
+    </>
+  );
 }
 
 export default function App() {
@@ -33,6 +43,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <GroupPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account"
+        element={
+          <ProtectedRoute>
+            <AccountPage />
           </ProtectedRoute>
         }
       />

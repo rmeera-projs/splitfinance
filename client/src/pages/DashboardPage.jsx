@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
 
 export default function DashboardPage() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [groups, setGroups] = useState([]);
   const [insightItems, setInsightItems] = useState([]);
   const [newGroupName, setNewGroupName] = useState("");
@@ -56,9 +56,6 @@ export default function DashboardPage() {
     <div className="max-w-2xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Hi, {user?.name}</h1>
-        <button onClick={logout} className="text-sm text-gray-500 hover:underline">
-          Log out
-        </button>
       </div>
 
       <section className="mb-8">
