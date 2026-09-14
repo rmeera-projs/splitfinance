@@ -29,18 +29,24 @@ if [ ! -f /swapfile ]; then
   echo "/swapfile none swap sw 0 0" >> /etc/fstab
 fi
 
-# --- Persistent Postgres data volume ---
-# A separate EBS volume (terraform/main.tf's aws_ebs_volume.postgres_data),
-# independent of this instance's own lifecycle - the root volume above gets
-# destroyed on every instance replacement (which user_data_replace_on_change
-# triggers on nearly any config change, including this file), which would
-# otherwise silently wipe every user account each time. t3 instances are
-# Nitro-based, so the attachment shows up to the OS as an NVMe device, not
-# literally the /dev/sdf named in the attachment resource - the stable way
-# to find the right one is the /dev/disk/by-id symlink AWS derives from the
-# volume ID. The attachment is a separate resource created after this
-# instance, so it may not have shown up yet when this script starts -
-# hence the wait loop.
+# --- Persistent data volume (Postgres + Caddy's TLS certs) ---
+# A separate EBS volume (terraform/main.tf's aws_ebs_volume.postgres_data,
+# named for its original purpose but now also holding Caddy's cert data -
+# see below), independent of this instance's own lifecycle - the root
+# volume above gets destroyed on every instance replacement (which
+# user_data_replace_on_change triggers on nearly any config change,
+# including this file). Without this volume, that would silently wipe
+# every user account on every replacement; it would *also* force Caddy to
+# request a brand new Let's Encrypt certificate on every single
+# replacement, which is exactly how this project briefly exhausted Let's
+# Encrypt's rate limit (5 certs/domain/week) during one heavy day of
+# config changes - certs need to survive replacement just as much as the
+# database does. t3 instances are Nitro-based, so the attachment shows up
+# to the OS as an NVMe device, not literally the /dev/sdf named in the
+# attachment resource - the stable way to find the right one is the
+# /dev/disk/by-id symlink AWS derives from the volume ID. The attachment
+# is a separate resource created after this instance, so it may not have
+# shown up yet when this script starts - hence the wait loop.
 EBS_DEVICE="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$(echo "${postgres_volume_id}" | tr -d '-')"
 for i in $(seq 1 30); do
   [ -e "$EBS_DEVICE" ] && break
@@ -63,8 +69,11 @@ grep -q "$EBS_DEVICE" /etc/fstab || echo "$EBS_DEVICE /mnt/postgres-data ext4 de
 # freshly formatted ext4 filesystem always has a "lost+found" directory at
 # its root, which fails initdb's "data directory must be empty" check. An
 # empty subdirectory under the mount point is what actually gets
-# bind-mounted as pgdata below.
-mkdir -p /mnt/postgres-data/pgdata
+# bind-mounted as pgdata below. Caddy has no such restriction, but gets its
+# own subdirectories too, for the same reason: /data (its certs/ACME
+# account state) and /config need to persist across replacement exactly
+# like pgdata does.
+mkdir -p /mnt/postgres-data/pgdata /mnt/postgres-data/caddy-data /mnt/postgres-data/caddy-config
 
 # --- App ---
 git clone --branch "${repo_branch}" --depth 1 "${repo_url}" /opt/splitfinance
@@ -129,14 +138,16 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
+      - /mnt/postgres-data/caddy-data:/data
+      - /mnt/postgres-data/caddy-config:/config
 
 # Redefines the base compose file's "pgdata" named volume (left completely
 # untouched there, so local dev is unaffected) to bind-mount the persistent
 # EBS volume mounted above instead of Docker's normal internal storage -
 # the db service's own "pgdata:/var/lib/postgresql/data" line never
-# changes, only what "pgdata" itself resolves to on disk.
+# changes, only what "pgdata" itself resolves to on disk. Caddy's volumes
+# above are plain bind mounts instead (no such indirection needed - it has
+# no equivalent of Postgres's "must be an empty directory" restriction).
 volumes:
   pgdata:
     driver: local
@@ -144,8 +155,6 @@ volumes:
       type: none
       device: /mnt/postgres-data/pgdata
       o: bind
-  caddy_data:
-  caddy_config:
 EOF
 
 # Only the frontend site gets a header block here - it's a static build
