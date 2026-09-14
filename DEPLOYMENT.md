@@ -124,26 +124,24 @@ no inbound port needs to open for it, ever. This works because
 `AmazonSSMManagedInstanceCore` policy, and the Canonical Ubuntu AMI ships
 with the SSM agent already installed and running.
 
-To turn the deploy job on, add two repository secrets (**Settings → Secrets
-and variables → Actions → New repository secret**) - the same AWS access
-key you used for `aws configure` when setting up Terraform:
+The deploy job authenticates to AWS via **GitHub OIDC**
+(`terraform/github_oidc.tf`), not a stored access-key secret - no
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repo secret to create or
+rotate at all. Each run mints a short-lived credential by exchanging a
+GitHub-issued OIDC token for the `splitfinance-github-actions-deploy` IAM
+role, which trusts *only* this repo's own workflow runs on pushes to
+`main` (enforced by the role's trust policy, not just convention) and can
+do nothing beyond `ec2:DescribeInstances`/`ssm:SendCommand`/
+`ssm:GetCommandInvocation` - it has no access to any other AWS resource or
+service in the account. `terraform apply` (with the OIDC provider/role in
+`github_oidc.tf` applied) is the only setup step; there's nothing to
+configure on the GitHub side.
 
-| Secret | Value |
-|---|---|
-| `AWS_ACCESS_KEY_ID` | Your IAM user's access key ID |
-| `AWS_SECRET_ACCESS_KEY` | Your IAM user's secret access key |
+The workflow looks up the instance by its `Name=splitfinance-app` tag at
+deploy time, so there's no host/IP secret to keep in sync if the instance
+is ever replaced.
 
-Both values are sensitive - paste them directly into GitHub's secret form,
-never into a commit, a PR description, or chat. The workflow looks up the
-instance by its `Name=splitfinance-app` tag at deploy time, so there's no
-host/IP secret to keep in sync if the instance is ever replaced.
-
-Without these two secrets set, the `deploy` job simply fails (nothing to
-authenticate to AWS with) while `backend`/`frontend` still run
-normally - CI keeps working as pure CI until you're ready to turn on
-auto-deploy.
-
-Once both secrets are set, every merge to `main` deploys automatically -
+Every merge to `main` deploys automatically once the OIDC role exists -
 check progress under the repo's **Actions** tab. Manual deploys (SSH still
 works fine for troubleshooting, using `terraform/splitfinance-key.pem` from
 your own trusted IP) work alongside this; the workflow just automates the

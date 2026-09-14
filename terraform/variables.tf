@@ -79,6 +79,12 @@ variable "repo_url" {
   default     = "https://github.com/rmeera-projs/splitfinance.git"
 }
 
+variable "github_repo" {
+  description = "owner/repo (github_oidc.tf) - scopes the GitHub Actions deploy role's trust policy so only this repo's own main-branch workflow runs can assume it."
+  type        = string
+  default     = "rmeera-projs/splitfinance"
+}
+
 variable "repo_branch" {
   description = "Branch to deploy."
   type        = string

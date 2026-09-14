@@ -402,9 +402,12 @@ frontend tests (plus a frontend build) on every push/PR to `main`. On a push
 to `main`, once both test jobs pass, it also redeploys the AWS EC2 instance
 automatically - via AWS Systems Manager, not SSH, since the instance's
 security group intentionally only allows SSH from one trusted IP that a
-GitHub-hosted runner could never match. See [DEPLOYMENT.md](DEPLOYMENT.md#continuous-deployment-via-github-actions-aws-only)
-for the two repo secrets it needs. Railway's own auto-deploy-on-push (see
-above) doesn't go through this workflow at all.
+GitHub-hosted runner could never match. Authenticates to AWS via GitHub
+OIDC ([`terraform/github_oidc.tf`](terraform/github_oidc.tf)) rather than a
+stored access-key secret - see
+[DEPLOYMENT.md](DEPLOYMENT.md#continuous-deployment-via-github-actions-aws-only)
+for details. Railway's own auto-deploy-on-push (see above) doesn't go
+through this workflow at all.
 
 ## 🧪 Testing
 
