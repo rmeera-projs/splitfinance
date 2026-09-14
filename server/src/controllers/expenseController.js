@@ -4,6 +4,7 @@ const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../services/categorizationService");
+const { parseExpenseText } = require("../services/expenseParsingService");
 const { emitGroupActivity } = require("../services/realtimeService");
 
 const splitSchema = z.object({
@@ -32,6 +33,11 @@ const updateExpenseSchema = z.object({
 
 const updateCategorySchema = z.object({
   category: z.enum(CATEGORIES),
+});
+
+const parseExpenseSchema = z.object({
+  groupId: z.number(),
+  text: z.string().min(1),
 });
 
 async function createExpense(req, res, next) {
@@ -193,4 +199,35 @@ async function listCategories(req, res) {
   res.json({ categories: CATEGORIES });
 }
 
-module.exports = { createExpense, updateExpense, updateExpenseCategory, deleteExpense, listCategories };
+// Parses a free-text sentence ("Dinner $60, I paid, split with Bob and
+// Charlie") into a { description, amount, payerId, splitWithIds } suggestion
+// for the client to pre-fill its add-expense form with - this never creates
+// an expense itself, so a bad parse just means re-typing the sentence or
+// editing the pre-filled form, not a wrong charge silently going through.
+async function parseExpense(req, res, next) {
+  try {
+    const { groupId, text } = parseExpenseSchema.parse(req.body);
+
+    const membership = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: req.userId } },
+    });
+    if (!membership) throw new ApiError(403, "You are not a member of this group");
+
+    const members = await prisma.groupMember.findMany({
+      where: { groupId },
+      include: { user: { select: publicUserSelect } },
+    });
+    const memberList = members.map((m) => ({ id: m.user.id, name: m.user.name }));
+
+    const result = await parseExpenseText(text, memberList, req.userId);
+    if (!result) {
+      throw new ApiError(422, 'Couldn\'t understand that - try including an amount, e.g. "Dinner $45"');
+    }
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { createExpense, updateExpense, updateExpenseCategory, deleteExpense, listCategories, parseExpense };

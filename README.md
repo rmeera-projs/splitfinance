@@ -23,6 +23,9 @@ expenses and settle up with the minimum number of payments.
   a bill: equally, by percentage, or by exact amount
 - **Auto-Categorization** — expenses are automatically tagged with one of 9 fixed
   categories using Cohere's Chat API
+- **Natural-Language Expense Entry** — type something like "Dinner $60, I
+  paid, split with Bob and Charlie" and Cohere parses it into the
+  add-expense form's fields for you to review before submitting
 - **Balances** — real-time "who owes whom" view per group
 - **Debt Simplification** — a graph-reduction algorithm that collapses a tangled
   web of IOUs into the minimum number of transactions needed to settle a group
@@ -53,7 +56,9 @@ greedy min-cash-flow algorithm (`server/src/services/simplifyDebts.js`) that:
 
 This turns an O(n²) worst-case payment graph into O(n) transactions.
 
-## 🤖 Auto-Categorization with Cohere
+## 🤖 AI Features (Cohere)
+
+### Auto-Categorization
 
 Every expense is automatically tagged with one of 9 fixed categories (Food &
 Drink, Groceries, Transportation, Housing & Utilities, Entertainment, Shopping,
@@ -76,6 +81,34 @@ manual tagging. This is implemented in
 
 If `COHERE_API_KEY` isn't set, every expense is simply categorized as `"Other"`
 — the app works fully without it.
+
+### Natural-Language Expense Entry
+
+The add-expense form has a text box above its regular fields for describing
+an expense in plain English - "Dinner $60, I paid, split with Bob and
+Charlie" - which
+[`expenseParsingService.js`](server/src/services/expenseParsingService.js)
+turns into structured fields:
+
+- Same Cohere Chat endpoint as categorization, but prompted for a single
+  JSON object (`{description, amount, payerId, splitWithIds}`) instead of
+  a category label, with the group's actual members (id + name) listed in
+  the prompt so "Bob"/"I"/"me" resolve to real member ids rather than raw
+  names the rest of the app can't use
+- **Never creates the expense itself** - the parsed result only pre-fills
+  the existing add-expense form (description, amount, "Paid by", and the
+  split), so a bad parse just means editing the form before submitting,
+  never a wrong charge going through unreviewed
+- Drops any id the model hallucinates (a `payerId`/`splitWithIds` entry
+  that isn't an actual member of the group) rather than trusting it outright
+- A mentioned subset of members (not everyone) is expressed as exact
+  per-person dollar amounts, since the "equal" split type has no
+  member-picker yet - see the Roadmap
+- Without `COHERE_API_KEY`, falls back to a much cruder regex-only parse
+  (just pulls out a dollar amount) rather than failing outright - same
+  "optional until you need it" spirit as auto-categorization
+- Fully unit-tested with a mocked Cohere client
+  (`expenseParsingService.test.js`)
 
 ## 📊 Spending Insights
 
@@ -164,7 +197,7 @@ splitfinance/
 ```
 
 ### API Surface
-19 REST endpoints across 6 resources (auth, users, groups, expenses,
+20 REST endpoints across 6 resources (auth, users, groups, expenses,
 settlements, insights) - see `server/src/routes/`.
 
 ### Tech Stack
@@ -176,7 +209,7 @@ settlements, insights) - see `server/src/routes/`.
 | Auth | JWT + bcrypt |
 | Email | Resend (password reset links) |
 | Real-time | Socket.IO (live group activity notices) |
-| AI | Cohere Chat API (expense auto-categorization) |
+| AI | Cohere Chat API (expense auto-categorization, natural-language expense entry) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 | Infra | Docker Compose, Caddy (reverse proxy + automatic HTTPS) |
 | CI/CD | GitHub Actions (test on every PR, auto-deploy to AWS via SSM on merge) |
@@ -212,14 +245,16 @@ npm run dev
 Backend runs on `http://localhost:5000`, frontend on `http://localhost:5173`.
 
 #### Cohere API key (optional)
-Auto-categorization needs a [Cohere](https://cohere.com) API key. Add it to
-`server/.env`:
+Auto-categorization and natural-language expense entry both need a
+[Cohere](https://cohere.com) API key. Add it to `server/.env`:
 ```
 COHERE_API_KEY="your-key-here"
 ```
-This is optional — without it, every expense is categorized as `"Other"` and
-everything else works normally. No key is needed to run the test suite; the
-Cohere client is fully mocked in tests.
+This is optional — without it, every expense is categorized as `"Other"`
+and natural-language entry falls back to a much cruder regex-only parse
+(see [expenseParsingService.js](server/src/services/expenseParsingService.js)),
+but everything else works normally. No key is needed to run the test
+suite; the Cohere client is fully mocked in tests.
 
 #### Resend API key (optional)
 Password reset emails need a [Resend](https://resend.com) API key (free
@@ -308,19 +343,19 @@ above) doesn't go through this workflow at all.
 
 ## 🧪 Testing
 
-127 tests total (68 backend, 59 frontend), with everything external mocked -
+166 tests total (94 backend, 72 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no Resend calls, no browser needed.
 
 ```bash
-# Backend: 68 tests (Jest + Supertest), run against the real Express app
-# with a mocked Prisma client, mocked categorizationService, and mocked
-# emailService. A handful of these spin up a real (in-process, no external
-# network) Socket.IO server + client to exercise realtimeService's auth and
-# room logic directly.
+# Backend: 94 tests (Jest + Supertest), run against the real Express app
+# with a mocked Prisma client, mocked categorizationService/
+# expenseParsingService, and mocked emailService. A handful of these spin
+# up a real (in-process, no external network) Socket.IO server + client to
+# exercise realtimeService's auth and room logic directly.
 cd server
 npm test
 
-# Frontend: 59 tests (Vitest + React Testing Library), with the API
+# Frontend: 72 tests (Vitest + React Testing Library), with the API
 # client, AuthContext, and the realtime socket mocked
 cd client
 npm test
@@ -344,6 +379,12 @@ See `server/prisma/schema.prisma` for the full schema.
 
 ## 🗺️ Roadmap
 - [x] WebSocket-based real-time updates
+- [x] Natural-language expense entry - type "Dinner $60, I paid, split with
+  Bob and Charlie" into a text box on the add-expense form and Cohere
+  parses it into `{description, amount, payerId, splitWithIds}`, pre-filling
+  the form for you to confirm (never submits on its own). A subset split
+  (not everyone) is represented as exact per-person amounts, since the
+  "equal" split type has no member-picker yet - see the next item.
 - [ ] Choose who an expense splits between when adding it - equal splits
   currently always divide across every group member with no way to exclude
   someone (exact/percentage splits can informally exclude someone by leaving
@@ -355,10 +396,6 @@ See `server/prisma/schema.prisma` for the full schema.
 - [ ] Per-person balances on the dashboard - the main page currently only
   shows spending totals and a group list, with no rollup of how much you
   owe (or are owed by) each specific person across all your shared groups
-- [ ] Natural-language expense entry - type "Dinner at Nobu, $120, split
-  with Alice and Bob" into a single text box and have Cohere parse it into
-  the structured `{description, amount, splits}` the add-expense form
-  already expects, pre-filling it for you to confirm
 - [ ] A conversational balances/insights assistant - ask "how much did I
   spend on food this month?" or "who do I owe the most right now?" in a
   chat box on the dashboard; a genuine tool-calling agent rather than a

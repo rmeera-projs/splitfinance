@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const request = require("supertest");
 
 jest.mock("../config/prisma", () => ({
-  groupMember: { findUnique: jest.fn() },
+  groupMember: { findUnique: jest.fn(), findMany: jest.fn() },
   group: { findUnique: jest.fn() },
   expense: {
     create: jest.fn(),
@@ -22,9 +22,12 @@ jest.mock("../services/categorizationService", () => {
   return { ...actual, categorizeExpense: jest.fn() };
 });
 
+jest.mock("../services/expenseParsingService", () => ({ parseExpenseText: jest.fn() }));
+
 const app = require("../app");
 const prisma = require("../config/prisma");
 const { categorizeExpense } = require("../services/categorizationService");
+const { parseExpenseText } = require("../services/expenseParsingService");
 
 function tokenFor(userId) {
   return jwt.sign({ userId }, process.env.JWT_SECRET);
@@ -316,5 +319,61 @@ describe("GET /api/expenses/categories", () => {
     expect(res.status).toBe(200);
     expect(res.body.categories).toEqual(expect.arrayContaining(["Food & Drink", "Other"]));
     expect(res.body.categories.length).toBeGreaterThan(1);
+  });
+});
+
+describe("POST /api/expenses/parse", () => {
+  test("returns the parsed suggestion for a member of the group", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.groupMember.findMany.mockResolvedValue([
+      { user: { id: USER_ID, name: "Alice" } },
+      { user: { id: OTHER_USER_ID, name: "Bob" } },
+    ]);
+    parseExpenseText.mockResolvedValue({ description: "Dinner", amount: 60, payerId: OTHER_USER_ID, splitWithIds: null });
+
+    const res = await request(app)
+      .post("/api/expenses/parse")
+      .set(AUTH)
+      .send({ groupId: 10, text: "Dinner $60, Bob paid" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ description: "Dinner", amount: 60, payerId: OTHER_USER_ID, splitWithIds: null });
+    expect(parseExpenseText).toHaveBeenCalledWith(
+      "Dinner $60, Bob paid",
+      [
+        { id: USER_ID, name: "Alice" },
+        { id: OTHER_USER_ID, name: "Bob" },
+      ],
+      USER_ID
+    );
+  });
+
+  test("rejects a non-member of the group", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).post("/api/expenses/parse").set(AUTH).send({ groupId: 10, text: "Dinner $60" });
+
+    expect(res.status).toBe(403);
+    expect(parseExpenseText).not.toHaveBeenCalled();
+  });
+
+  test("responds with 422 when the sentence can't be understood at all", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.groupMember.findMany.mockResolvedValue([{ user: { id: USER_ID, name: "Alice" } }]);
+    parseExpenseText.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post("/api/expenses/parse")
+      .set(AUTH)
+      .send({ groupId: 10, text: "dinner with friends" });
+
+    expect(res.status).toBe(422);
+  });
+
+  test("rejects an empty sentence", async () => {
+    const res = await request(app).post("/api/expenses/parse").set(AUTH).send({ groupId: 10, text: "" });
+
+    expect(res.status).toBe(400);
+    expect(prisma.groupMember.findUnique).not.toHaveBeenCalled();
   });
 });

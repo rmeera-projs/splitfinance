@@ -175,6 +175,91 @@ describe("GroupPage - adding an expense", () => {
   });
 });
 
+describe("GroupPage - natural-language expense entry", () => {
+  test("fills in the form from a parsed sentence, without submitting an expense", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockImplementation((url) => {
+      if (url === "/expenses/parse") {
+        return Promise.resolve({
+          data: { description: "Dinner", amount: 60, payerId: OTHER.id, splitWithIds: null },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(
+      screen.getByPlaceholderText(/dinner \$60/i),
+      "Dinner $60, Bob paid, split with everyone"
+    );
+    await user.click(screen.getByRole("button", { name: "Fill in form" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/expenses/parse", {
+        groupId: 7,
+        text: "Dinner $60, Bob paid, split with everyone",
+      })
+    );
+    expect(await screen.findByPlaceholderText("Description")).toHaveValue("Dinner");
+    expect(screen.getByPlaceholderText("Amount")).toHaveValue(60);
+    expect(screen.getByRole("combobox", { name: "Paid by" })).toHaveValue(String(OTHER.id));
+    // Parsing only pre-fills the form - it must never itself create the expense.
+    expect(api.post).not.toHaveBeenCalledWith("/expenses", expect.anything());
+  });
+
+  test("represents a split among a subset of members as exact amounts", async () => {
+    const user = userEvent.setup();
+    const THIRD = { id: 3, name: "Charlie", username: "charlie3" };
+    mockGroupResponse({
+      data: baseGroup({ members: [{ user: ME }, { user: OTHER }, { user: THIRD }] }),
+    });
+    api.post.mockImplementation((url) => {
+      if (url === "/expenses/parse") {
+        return Promise.resolve({
+          data: { description: "Pizza", amount: 20, payerId: null, splitWithIds: [ME.id, OTHER.id] },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText(/dinner \$60/i), "Pizza $20 split between me and Bob");
+    await user.click(screen.getByRole("button", { name: "Fill in form" }));
+    await screen.findByDisplayValue("Pizza");
+
+    // "By exact amount" becomes selected, with $10 pre-filled for the two
+    // mentioned members and nothing for Charlie.
+    expect(screen.getByDisplayValue("By exact amount")).toBeInTheDocument();
+    const exactInputs = screen.getAllByPlaceholderText("$");
+    expect(exactInputs.map((el) => el.value)).toEqual(["10", "10", ""]);
+  });
+
+  test("shows an error when the sentence can't be understood", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockImplementation((url) => {
+      if (url === "/expenses/parse") {
+        return Promise.reject({ response: { data: { error: "Couldn't understand that" } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText(/dinner \$60/i), "asdf");
+    await user.click(screen.getByRole("button", { name: "Fill in form" }));
+
+    expect(await screen.findByText("Couldn't understand that")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Description")).toHaveValue("");
+  });
+});
+
 describe("GroupPage - editing and deleting an expense", () => {
   function groupWithMyExpense() {
     return baseGroup({

@@ -30,6 +30,14 @@ export default function GroupPage() {
   const [splitValues, setSplitValues] = useState({}); // userId -> string (exact $ or %)
   const [expenseError, setExpenseError] = useState("");
 
+  // Natural-language expense entry - parses free text into the same
+  // description/amount/paidBy/split state above rather than creating the
+  // expense directly, so a bad parse just means editing the pre-filled
+  // form, not a wrong charge silently going through.
+  const [nlText, setNlText] = useState("");
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlError, setNlError] = useState("");
+
   // Fixed category list from the server (see categorizationService),
   // used to populate the manual-override dropdown on each expense.
   const [categories, setCategories] = useState([]);
@@ -143,6 +151,45 @@ export default function GroupPage() {
     const diff = Math.round((total - sum) * 100) / 100;
     splits[0].amountOwed = Math.round((splits[0].amountOwed + diff) * 100) / 100;
     return splits;
+  }
+
+  // Pre-fills the add-expense form from a parsed sentence - never submits
+  // anything itself, so the user always reviews the result (and the
+  // description auto-categorization, split math, etc.) before it's real.
+  async function handleParseExpense() {
+    if (!nlText.trim()) return;
+    setNlError("");
+    setNlLoading(true);
+    try {
+      const { data } = await api.post("/expenses/parse", { groupId: Number(id), text: nlText });
+
+      if (data.description) setDescription(data.description);
+      setAmount(String(data.amount));
+      if (data.payerId) setPaidBy(data.payerId);
+
+      const allMemberIds = group.members.map((m) => m.user.id);
+      if (data.splitWithIds && data.splitWithIds.length > 0 && data.splitWithIds.length < allMemberIds.length) {
+        // The "equal" split type always divides among every member, so a
+        // subset gets expressed as exact amounts instead: an equal share
+        // for just the mentioned people, nothing for anyone else.
+        const share = Math.round((data.amount / data.splitWithIds.length) * 100) / 100;
+        const values = {};
+        data.splitWithIds.forEach((userId) => {
+          values[userId] = String(share);
+        });
+        setSplitType("exact");
+        setSplitValues(values);
+      } else {
+        setSplitType("equal");
+        setSplitValues({});
+      }
+
+      setNlText("");
+    } catch (err) {
+      setNlError(err.response?.data?.error || "Couldn't understand that - try rephrasing, or fill in the form below");
+    } finally {
+      setNlLoading(false);
+    }
   }
 
   async function handleAddExpense(e) {
@@ -424,6 +471,35 @@ export default function GroupPage() {
           </p>
         ) : (
         <form onSubmit={handleAddExpense} className="space-y-3">
+          <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-2">
+            <label className="block text-sm font-medium text-emerald-900">
+              Describe it in plain English
+            </label>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 border rounded px-3 py-2"
+                placeholder='e.g. "Dinner $60, I paid, split with Bob and Charlie"'
+                value={nlText}
+                onChange={(e) => setNlText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleParseExpense();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleParseExpense}
+                disabled={nlLoading || !nlText.trim()}
+                className="bg-emerald-600 text-white px-4 rounded font-medium hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {nlLoading ? "Thinking…" : "Fill in form"}
+              </button>
+            </div>
+            {nlError && <p className="text-sm text-red-600">{nlError}</p>}
+          </div>
+
           <div className="flex gap-2">
             <input
               className="flex-1 border rounded px-3 py-2"
@@ -444,6 +520,7 @@ export default function GroupPage() {
           <div className="flex gap-2 items-center text-sm">
             <label className="text-gray-600">Paid by</label>
             <select
+              aria-label="Paid by"
               className="border rounded px-2 py-1"
               value={paidBy}
               onChange={(e) => setPaidBy(Number(e.target.value))}

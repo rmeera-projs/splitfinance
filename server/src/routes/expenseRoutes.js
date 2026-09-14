@@ -6,12 +6,14 @@ const {
   updateExpenseCategory,
   deleteExpense,
   listCategories,
+  parseExpense,
 } = require("../controllers/expenseController");
 
 const router = express.Router();
 
 router.use(requireAuth);
 router.get("/categories", listCategories);
+router.post("/parse", parseExpense);
 router.post("/", createExpense);
 router.patch("/:id", updateExpense);
 router.patch("/:id/category", updateExpenseCategory);
