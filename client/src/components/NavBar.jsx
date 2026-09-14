@@ -21,7 +21,8 @@ export default function NavBar() {
   return (
     <nav className="border-b bg-white">
       <div className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between">
-        <Link to="/" className="font-bold text-emerald-700">
+        <Link to="/" className="flex items-center gap-2 font-bold text-emerald-700">
+          <img src="/splitfinance-logo-nav.png" alt="" className="w-8 h-8 rounded-lg" />
           SplitFinance
         </Link>
 
