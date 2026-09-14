@@ -101,9 +101,9 @@ turns into structured fields:
   never a wrong charge going through unreviewed
 - Drops any id the model hallucinates (a `payerId`/`splitWithIds` entry
   that isn't an actual member of the group) rather than trusting it outright
-- A mentioned subset of members (not everyone) is expressed as exact
-  per-person dollar amounts, since the "equal" split type has no
-  member-picker yet - see the Roadmap
+- A mentioned subset of members (not everyone) checks/unchecks the
+  add-expense form's "Split between" list to match, applying to whichever
+  split type is selected
 - Without `COHERE_API_KEY`, falls back to a much cruder regex-only parse
   (just pulls out a dollar amount) rather than failing outright - same
   "optional until you need it" spirit as auto-categorization
@@ -382,14 +382,11 @@ See `server/prisma/schema.prisma` for the full schema.
 - [x] Natural-language expense entry - type "Dinner $60, I paid, split with
   Bob and Charlie" into a text box on the add-expense form and Cohere
   parses it into `{description, amount, payerId, splitWithIds}`, pre-filling
-  the form for you to confirm (never submits on its own). A subset split
-  (not everyone) is represented as exact per-person amounts, since the
-  "equal" split type has no member-picker yet - see the next item.
-- [ ] Choose who an expense splits between when adding it - equal splits
-  currently always divide across every group member with no way to exclude
-  someone (exact/percentage splits can informally exclude someone by leaving
-  their amount blank, but there's no explicit member-picker for any split
-  type)
+  the form for you to confirm (never submits on its own)
+- [x] Choose who an expense splits between when adding it - a "Split
+  between" checkbox list (defaulting to everyone) now applies to every
+  split type, including "equal" - excluding someone no longer requires the
+  exact/percentage workaround of leaving their amount blank
 - [ ] Settle up a custom (partial) amount - settling currently always pays
   off a balance in full; there's no way to record a partial payment toward
   what you owe someone

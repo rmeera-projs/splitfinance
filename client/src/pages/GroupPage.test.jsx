@@ -210,7 +210,7 @@ describe("GroupPage - natural-language expense entry", () => {
     expect(api.post).not.toHaveBeenCalledWith("/expenses", expect.anything());
   });
 
-  test("represents a split among a subset of members as exact amounts", async () => {
+  test("checks/unchecks the split-between boxes to match a parsed subset", async () => {
     const user = userEvent.setup();
     const THIRD = { id: 3, name: "Charlie", username: "charlie3" };
     mockGroupResponse({
@@ -232,11 +232,64 @@ describe("GroupPage - natural-language expense entry", () => {
     await user.click(screen.getByRole("button", { name: "Fill in form" }));
     await screen.findByDisplayValue("Pizza");
 
-    // "By exact amount" becomes selected, with $10 pre-filled for the two
-    // mentioned members and nothing for Charlie.
-    expect(screen.getByDisplayValue("By exact amount")).toBeInTheDocument();
-    const exactInputs = screen.getAllByPlaceholderText("$");
-    expect(exactInputs.map((el) => el.value)).toEqual(["10", "10", ""]);
+    expect(screen.getByRole("checkbox", { name: "You" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Bob" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Charlie" })).not.toBeChecked();
+
+    // Submitting an equal split now divides only between the two checked
+    // members, with Charlie excluded rather than getting a $0 share.
+    await user.click(screen.getByRole("button", { name: "Add expense" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/expenses", {
+        groupId: 7,
+        paidBy: ME.id,
+        amount: 20,
+        description: "Pizza",
+        splits: [
+          { userId: ME.id, amountOwed: 10 },
+          { userId: OTHER.id, amountOwed: 10 },
+        ],
+      })
+    );
+  });
+
+  test("unchecking a member excludes them from an equal split", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockResolvedValue({ data: {} });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText("Description"), "Groceries");
+    await user.type(screen.getByPlaceholderText("Amount"), "50");
+    await user.click(screen.getByRole("checkbox", { name: "Bob" }));
+    await user.click(screen.getByRole("button", { name: "Add expense" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/expenses",
+        expect.objectContaining({ splits: [{ userId: ME.id, amountOwed: 50 }] })
+      )
+    );
+  });
+
+  test("shows an error instead of submitting when every member is unchecked", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText("Description"), "Groceries");
+    await user.type(screen.getByPlaceholderText("Amount"), "50");
+    await user.click(screen.getByRole("checkbox", { name: "You" }));
+    await user.click(screen.getByRole("checkbox", { name: "Bob" }));
+    await user.click(screen.getByRole("button", { name: "Add expense" }));
+
+    expect(await screen.findByText("Select at least one person to split with")).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalledWith("/expenses", expect.anything());
   });
 
   test("shows an error when the sentence can't be understood", async () => {

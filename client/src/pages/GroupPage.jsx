@@ -28,6 +28,11 @@ export default function GroupPage() {
   const [paidBy, setPaidBy] = useState(user.id);
   const [splitType, setSplitType] = useState("equal"); // "equal" | "exact" | "percentage"
   const [splitValues, setSplitValues] = useState({}); // userId -> string (exact $ or %)
+  // null means "everyone currently in the group" - the common case, and one
+  // that shouldn't go stale if someone else is added to the group while
+  // this form is open. Only becomes an explicit array once the user (or a
+  // parsed sentence) actually excludes someone.
+  const [splitMembers, setSplitMembers] = useState(null);
   const [expenseError, setExpenseError] = useState("");
 
   // Natural-language expense entry - parses free text into the same
@@ -103,6 +108,21 @@ export default function GroupPage() {
     setSplitValues((prev) => ({ ...prev, [userId]: value }));
   }
 
+  // Resolves the "everyone" default to an actual id list at the moment
+  // it's needed, rather than baking it into state - so it always reflects
+  // the group's current membership until someone actually excludes a
+  // member.
+  function allMemberIds() {
+    return group.members.map((m) => m.user.id);
+  }
+
+  function toggleSplitMember(userId) {
+    setSplitMembers((prev) => {
+      const current = prev === null ? allMemberIds() : prev;
+      return current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId];
+    });
+  }
+
   function setEditSplitValue(userId, value) {
     setEditSplitValues((prev) => ({ ...prev, [userId]: value }));
   }
@@ -166,23 +186,10 @@ export default function GroupPage() {
       if (data.description) setDescription(data.description);
       setAmount(String(data.amount));
       if (data.payerId) setPaidBy(data.payerId);
-
-      const allMemberIds = group.members.map((m) => m.user.id);
-      if (data.splitWithIds && data.splitWithIds.length > 0 && data.splitWithIds.length < allMemberIds.length) {
-        // The "equal" split type always divides among every member, so a
-        // subset gets expressed as exact amounts instead: an equal share
-        // for just the mentioned people, nothing for anyone else.
-        const share = Math.round((data.amount / data.splitWithIds.length) * 100) / 100;
-        const values = {};
-        data.splitWithIds.forEach((userId) => {
-          values[userId] = String(share);
-        });
-        setSplitType("exact");
-        setSplitValues(values);
-      } else {
-        setSplitType("equal");
-        setSplitValues({});
-      }
+      // A mentioned subset just becomes the split-member selection now -
+      // "equal" (or whatever split type is already chosen) applies to
+      // exactly those people. null falls back to "everyone" as usual.
+      setSplitMembers(data.splitWithIds && data.splitWithIds.length > 0 ? data.splitWithIds : null);
 
       setNlText("");
     } catch (err) {
@@ -198,7 +205,11 @@ export default function GroupPage() {
     if (!description.trim() || !amount) return;
 
     const total = Number(amount);
-    const members = group.members.map((m) => m.user);
+    const members = group.members.map((m) => m.user).filter((m) => splitMembers === null || splitMembers.includes(m.id));
+    if (members.length === 0) {
+      setExpenseError("Select at least one person to split with");
+      return;
+    }
     const splits = buildSplits(members, total, splitType, splitValues, setExpenseError);
     if (!splits) return;
 
@@ -214,6 +225,7 @@ export default function GroupPage() {
       setDescription("");
       setAmount("");
       setSplitValues({});
+      setSplitMembers(null);
       fetchGroup();
     } catch (err) {
       setExpenseError(err.response?.data?.error || "Failed to add expense");
@@ -544,24 +556,31 @@ export default function GroupPage() {
             </select>
           </div>
 
-          {splitType !== "equal" && (
-            <div className="space-y-1 bg-white border rounded p-3">
-              {group.members.map((m) => (
-                <div key={m.user.id} className="flex items-center gap-2 text-sm">
+          <div className="space-y-1 bg-white border rounded p-3">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Split between</p>
+            {group.members.map((m) => {
+              const checked = splitMembers === null || splitMembers.includes(m.user.id);
+              return (
+                <label key={m.user.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={checked} onChange={() => toggleSplitMember(m.user.id)} />
                   <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
-                  <input
-                    className="w-24 border rounded px-2 py-1"
-                    type="number"
-                    step="0.01"
-                    placeholder={splitType === "exact" ? "$" : "%"}
-                    value={splitValues[m.user.id] || ""}
-                    onChange={(e) => setSplitValue(m.user.id, e.target.value)}
-                  />
-                  <span className="text-gray-400">{splitType === "exact" ? "$" : "%"}</span>
-                </div>
-              ))}
-            </div>
-          )}
+                  {splitType !== "equal" && checked && (
+                    <>
+                      <input
+                        className="w-24 border rounded px-2 py-1"
+                        type="number"
+                        step="0.01"
+                        placeholder={splitType === "exact" ? "$" : "%"}
+                        value={splitValues[m.user.id] || ""}
+                        onChange={(e) => setSplitValue(m.user.id, e.target.value)}
+                      />
+                      <span className="text-gray-400">{splitType === "exact" ? "$" : "%"}</span>
+                    </>
+                  )}
+                </label>
+              );
+            })}
+          </div>
 
           {expenseError && <p className="text-sm text-red-600">{expenseError}</p>}
 
