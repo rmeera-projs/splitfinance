@@ -418,9 +418,9 @@ See `server/prisma/schema.prisma` for the full schema.
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
 - [x] Password reset flow
-- [ ] Rate limiting on auth endpoints - `/api/auth/signup` and `/login` are
-  open to the internet with no throttling; worth hardening now that the app
-  has a public URL
+- [x] Rate limiting on auth endpoints - `signup`/`login`/`forgot-password`
+  are capped at 10 requests/15min/IP via `express-rate-limit`
+  ([rateLimit.js](server/src/middleware/rateLimit.js))
 - [ ] Search/filter expenses within a group (by description, category, date
   range, or payer) - not needed with a handful of test expenses, but a real
   gap once a group's activity feed grows past a screenful
