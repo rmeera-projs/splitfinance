@@ -79,7 +79,7 @@ resource "aws_security_group" "app" {
   # Publicly open, they'd let anyone submit login/signup credentials in
   # plaintext, bypassing the TLS this project otherwise provides.
   ingress {
-    description = "Frontend (production build, served by \"serve\") - direct access for debugging only"
+    description = "Frontend production build (served by serve) - direct access for debugging only"
     from_port   = 4173
     to_port     = 4173
     protocol    = "tcp"
@@ -206,16 +206,18 @@ resource "aws_instance" "app" {
   }
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    eip_address         = aws_eip.app.public_ip
-    jwt_secret          = random_password.jwt_secret.result
-    cohere_api_key      = var.cohere_api_key
-    resend_api_key      = var.resend_api_key
-    resend_from_address = var.resend_from_address
-    domain_name         = var.domain_name
-    api_domain_name     = var.api_domain_name
-    postgres_volume_id  = aws_ebs_volume.postgres_data.id
-    repo_url            = var.repo_url
-    repo_branch         = var.repo_branch
+    eip_address          = aws_eip.app.public_ip
+    jwt_secret           = random_password.jwt_secret.result
+    cohere_api_key       = var.cohere_api_key
+    resend_api_key       = var.resend_api_key
+    resend_from_address  = var.resend_from_address
+    domain_name          = var.domain_name
+    api_domain_name      = var.api_domain_name
+    zerossl_eab_key_id   = var.zerossl_eab_key_id
+    zerossl_eab_hmac_key = var.zerossl_eab_hmac_key
+    postgres_volume_id   = aws_ebs_volume.postgres_data.id
+    repo_url             = var.repo_url
+    repo_branch          = var.repo_branch
   })
   # Re-run the boot script (and thus redeploy) whenever these inputs change.
   user_data_replace_on_change = true

@@ -53,6 +53,26 @@ variable "api_domain_name" {
   default     = "api.splitfinance.org"
 }
 
+# Optional - when set, Caddy issues certs via ZeroSSL instead of Let's
+# Encrypt (its default). Both are free, browser-trusted CAs with
+# independent rate limits, so this is the escape hatch for when Let's
+# Encrypt's limit (5 certs per exact domain set per 7 days) is exhausted -
+# get a free account + these credentials at https://app.zerossl.com under
+# Developer/API Access > EAB Credentials. Leave both blank to use Let's
+# Encrypt (the normal default).
+variable "zerossl_eab_key_id" {
+  description = "ZeroSSL EAB Key ID. Optional - see comment above."
+  type        = string
+  default     = ""
+}
+
+variable "zerossl_eab_hmac_key" {
+  description = "ZeroSSL EAB HMAC Key. Optional - see comment above."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "repo_url" {
   description = "Git URL the instance clones on boot."
   type        = string

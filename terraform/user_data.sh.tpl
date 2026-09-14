@@ -164,7 +164,25 @@ EOF
 # different defaults between helmet and Caddy for X-Frame-Options and
 # Referrer-Policy specifically, the API would end up sending two
 # conflicting values for the same header instead of one consistent one.
+#
+# The global options block is only emitted when zerossl_eab_key_id is set -
+# an escape hatch for when Let's Encrypt's rate limit (5 certs per exact
+# domain set per 7 days) is exhausted, e.g. by several instance
+# replacements in a row before certs were persisted (see the comment on
+# the EBS volume above). ZeroSSL is a separate, free, browser-trusted CA
+# with its own independent limit. Leaving both terraform variables blank
+# (the default) omits this block entirely and Caddy uses Let's Encrypt as
+# normal.
 cat > Caddyfile <<EOF
+%{ if zerossl_eab_key_id != "" }
+{
+	acme_ca https://acme.zerossl.com/v2/DV90
+	acme_eab {
+		key_id ${zerossl_eab_key_id}
+		mac_key ${zerossl_eab_hmac_key}
+	}
+}
+%{ endif }
 ${domain_name} {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
