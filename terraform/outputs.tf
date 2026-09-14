@@ -10,7 +10,7 @@ output "api_url" {
 
 output "direct_app_url" {
   description = "Frontend via the raw Elastic IP, bypassing Caddy/HTTPS. Only reachable from allowed_ssh_cidr - plaintext, debugging use only, e.g. while DNS is still propagating."
-  value       = "http://${aws_eip.app.public_ip}:5173"
+  value       = "http://${aws_eip.app.public_ip}:4173"
 }
 
 output "direct_api_url" {

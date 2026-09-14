@@ -6,10 +6,11 @@ const { io: ioClient } = require("socket.io-client");
 
 jest.mock("../config/prisma", () => ({
   groupMember: { findUnique: jest.fn() },
+  user: { findUnique: jest.fn() },
 }));
 
-function tokenFor(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET);
+function tokenFor(userId, tokenVersion = 0) {
+  return jwt.sign({ userId, tokenVersion }, process.env.JWT_SECRET);
 }
 
 // emitGroupActivity must never throw just because initRealtime hasn't run
@@ -38,6 +39,9 @@ describe("realtime socket server", () => {
     // calls below actually affect what the socket server sees.
     jest.isolateModules(() => {
       prisma = require("../config/prisma");
+      // Matches tokenFor()'s default tokenVersion of 0 - individual tests
+      // override this when they need to exercise a mismatch.
+      prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0 });
       const realtimeService = require("./realtimeService");
       httpServer = http.createServer();
       io = realtimeService.initRealtime(httpServer);
@@ -69,6 +73,17 @@ describe("realtime socket server", () => {
 
   test("rejects a connection with an invalid token", (done) => {
     const socket = connect("not-a-real-token");
+    socket.on("connect_error", () => done());
+    socket.on("connect", () => done(new Error("should not have connected")));
+  });
+
+  // Security-review regression: a token issued before a password change/
+  // reset (which bumps the user's tokenVersion - see authController's
+  // resetPassword and userController's changePassword) must stop working
+  // immediately, including for opening a new WebSocket connection.
+  test("rejects a well-formed token whose tokenVersion is stale", (done) => {
+    prisma.user.findUnique.mockResolvedValue({ tokenVersion: 5 });
+    const socket = connect(tokenFor(1, 0));
     socket.on("connect_error", () => done());
     socket.on("connect", () => done(new Error("should not have connected")));
   });

@@ -79,9 +79,9 @@ resource "aws_security_group" "app" {
   # Publicly open, they'd let anyone submit login/signup credentials in
   # plaintext, bypassing the TLS this project otherwise provides.
   ingress {
-    description = "Frontend (Vite dev server) - direct access for debugging only"
-    from_port   = 5173
-    to_port     = 5173
+    description = "Frontend (production build, served by \"serve\") - direct access for debugging only"
+    from_port   = 4173
+    to_port     = 4173
     protocol    = "tcp"
     cidr_blocks = [var.allowed_ssh_cidr]
   }

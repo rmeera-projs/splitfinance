@@ -12,6 +12,20 @@ const { errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
 
+// Express sees the connecting socket's address by default, not the
+// original client's - in production that's Caddy's own address on every
+// request, since it's the one reverse-proxying to this server (see
+// terraform/user_data.sh.tpl's Caddyfile). Without this, express-rate-limit
+// (see middleware/rateLimit.js) would key every visitor to that one
+// address, turning "10 requests per IP" into "10 requests total" for
+// everyone behind Caddy. `1` trusts exactly one hop in front of Express -
+// correct as long as Caddy is genuinely the only thing between the
+// internet and this server, which it is: the security group's direct
+// :5000 fallback (terraform/main.tf) is restricted to allowed_ssh_cidr, so
+// nobody outside that IP can reach Express directly and forge the header
+// this setting starts trusting.
+app.set("trust proxy", 1);
+
 // contentSecurityPolicy/crossOriginEmbedderPolicy are for server-rendered
 // HTML with inline scripts/embedded resources - this is a pure JSON API (the
 // frontend is a separate app, served by Caddy), so both are off rather than

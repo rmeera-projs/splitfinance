@@ -1,5 +1,6 @@
 const express = require("express");
 const { requireAuth } = require("../middleware/auth");
+const { aiRateLimit } = require("../middleware/rateLimit");
 const {
   createExpense,
   updateExpense,
@@ -13,9 +14,11 @@ const router = express.Router();
 
 router.use(requireAuth);
 router.get("/categories", listCategories);
-router.post("/parse", parseExpense);
-router.post("/", createExpense);
-router.patch("/:id", updateExpense);
+// Only the endpoints that actually call Cohere get aiRateLimit -
+// updateExpenseCategory is a manual correction with no AI call to protect.
+router.post("/parse", aiRateLimit, parseExpense);
+router.post("/", aiRateLimit, createExpense);
+router.patch("/:id", aiRateLimit, updateExpense);
 router.patch("/:id/category", updateExpenseCategory);
 router.delete("/:id", deleteExpense);
 

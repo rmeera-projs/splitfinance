@@ -4,6 +4,7 @@ const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect } = require("../utils/publicUser");
 const { USERNAME_RE } = require("../utils/validators");
+const { generateToken } = require("../utils/jwt");
 
 const SALT_ROUNDS = 10;
 
@@ -79,9 +80,17 @@ async function changePassword(req, res, next) {
     if (!valid) throw new ApiError(401, "Current password is incorrect");
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    await prisma.user.update({ where: { id: req.userId }, data: { passwordHash } });
+    // tokenVersion increments too, invalidating every token issued before
+    // now - including, deliberately, the one that just authenticated this
+    // very request. A fresh token is issued below so the requester's own
+    // session survives; anyone else holding an older token (e.g. one that
+    // leaked - possibly the very reason for this password change) doesn't.
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+    });
 
-    res.json({ message: "Password updated." });
+    res.json({ message: "Password updated.", token: generateToken(updated.id, updated.tokenVersion) });
   } catch (err) {
     next(err);
   }

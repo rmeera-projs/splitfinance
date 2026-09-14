@@ -185,6 +185,62 @@ emailed via [`emailService.js`](server/src/services/emailService.js) and
   instead of emailed - the endpoint still "succeeds" (no behavioral
   difference to detect), which is enough for local development without a
   Resend account
+- Resetting or changing a password bumps the user's `tokenVersion` - see
+  the Security section below for what that actually protects against
+
+## 🔒 Security
+
+A few protections worth calling out explicitly, mostly the product of a
+review once the app was live on a real domain:
+
+- **Group-membership checks on every user id a request supplies, not just
+  the requester** - `paidBy` and each `splits[].userId` on an expense,
+  `toUser` on a settlement, are all separate ids the *request* names, and
+  the database has no constraint tying them to any particular group (they
+  reference the global `User` table). The requester being a group member
+  only proves *they* belong there; without checking these other ids too, an
+  authenticated attacker could create their own group and reference any
+  other registered user - sequential integer ids - as a payer or split
+  participant. [`assertGroupMembers.js`](server/src/utils/assertGroupMembers.js)
+  is the shared check, used by `createExpense`, `updateExpense`, and
+  `createSettlement`.
+- **Group members see name/username only, never email or account-creation
+  date** - [`publicUser.js`](server/src/utils/publicUser.js) has two select
+  shapes: `publicUserSelect` (with email) is only for the authenticated
+  user's own account (`GET/PATCH /api/users/me`); every other nested user -
+  group members, expense payers - uses `groupUserSelect` instead.
+- **Sessions can actually be revoked** - JWTs carry a `tokenVersion` claim
+  (`User.tokenVersion` in the schema) checked against the user's current
+  value on every authenticated request, in both `requireAuth`
+  ([`middleware/auth.js`](server/src/middleware/auth.js)) and the Socket.IO
+  handshake ([`realtimeService.js`](server/src/services/realtimeService.js)).
+  Changing or resetting a password increments it, which invalidates every
+  token issued before that point - including one that leaked, which may be
+  exactly why someone's resetting their password - rather than leaving it
+  valid for the rest of its 7-day life. `changePassword` re-issues a fresh
+  token in its response so the requester's own session survives; anyone
+  else holding an older token doesn't.
+- **Rate limiting, tuned per endpoint kind**
+  ([`rateLimit.js`](server/src/middleware/rateLimit.js)): `signup`/`login`/
+  `forgot-password` are capped at 10 requests/15min/IP (guards against
+  credential stuffing and email enumeration). The Cohere-calling endpoints
+  (expense creation/editing, natural-language parsing) sit behind
+  `requireAuth`, but signup is public and free, so a per-IP limit alone
+  wouldn't stop someone from registering a few accounts and hammering these
+  from one machine anyway - they're limited per-IP *and* per-user on a
+  short window, plus a per-user daily ceiling, to bound Cohere spend/load
+  from a single account spread out over time too.
+- **`app.set("trust proxy", 1)`** in `app.js` - without it, Express sees
+  Caddy's own address on every request (the one reverse-proxying to it in
+  production - see Deploying for real, below), not the real client's,
+  which would turn the per-IP rate limits above into one shared limit for
+  every visitor behind Caddy.
+- **The production build is what actually ships** - AWS deploys
+  `client/Dockerfile.prod` (a real `vite build`, served as static files),
+  never `client/Dockerfile` (Vite's dev server, meant for local iteration
+  only - its own `vite.config.js` has an `allowedHosts: true` setting that
+  says as much). See Deploying for real, below, for the override that
+  makes this happen.
 
 ## 🏗️ Architecture
 
@@ -312,12 +368,20 @@ down. **This is what's actually running the live deploy** at
 https://splitfinance.org.
 
 A few things the AWS setup adds beyond the bare instance:
+- **The real production build** - unlike local `docker-compose up` (which
+  runs `client/Dockerfile`, Vite's dev server, for fast local iteration),
+  the AWS deploy overrides the client service to build
+  [`client/Dockerfile.prod`](client/Dockerfile.prod) instead: a real
+  `vite build` served as static files by `serve`, on port 4173. Vite's dev
+  server was never meant to be internet-facing (its own `vite.config.js`
+  has an `allowedHosts: true` setting that says so directly) - shipping it
+  to a public URL would have been a real vulnerability.
 - **HTTPS via Caddy** - a Caddy reverse proxy container gets automatic
   Let's Encrypt certs for `domain_name`/`api_domain_name` (set in
   `terraform/variables.tf` or `terraform.tfvars`; default
   `splitfinance.org`/`api.splitfinance.org`) as long as their DNS A
   records already point at the instance's Elastic IP before it boots.
-  The raw `http://<elastic-ip>:5173` / `:5000` URLs (this repo's
+  The raw `http://<elastic-ip>:4173` / `:5000` URLs (this repo's
   `direct_app_url`/`direct_api_url` Terraform outputs) still work as a
   plaintext debugging fallback, e.g. during DNS cutover - but they're
   restricted to `allowed_ssh_cidr` in the security group, not open to the
@@ -344,11 +408,11 @@ above) doesn't go through this workflow at all.
 
 ## 🧪 Testing
 
-168 tests total (94 backend, 74 frontend), with everything external mocked -
+195 tests total (121 backend, 74 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no Resend calls, no browser needed.
 
 ```bash
-# Backend: 94 tests (Jest + Supertest), run against the real Express app
+# Backend: 121 tests (Jest + Supertest), run against the real Express app
 # with a mocked Prisma client, mocked categorizationService/
 # expenseParsingService, and mocked emailService. A handful of these spin
 # up a real (in-process, no external network) Socket.IO server + client to
@@ -367,7 +431,7 @@ npm test
 7 tables:
 
 ```
-users                  (id, name, username, email, password_hash, created_at)
+users                  (id, name, username, email, password_hash, token_version, created_at)
 groups                 (id, name, created_by, is_finalized, created_at)
 group_members          (group_id, user_id, joined_at)
 expenses               (id, group_id, paid_by, amount, description, category, date, created_at)

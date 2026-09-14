@@ -8,8 +8,11 @@ export default defineConfig({
   server: {
     port: 5173,
     // Accept requests through any host header (e.g. a Cloudflare/ngrok tunnel
-    // subdomain), not just localhost. Fine for local dev; don't ship this
-    // config as-is behind a public production deploy.
+    // subdomain), not just localhost. This file only configures `vite dev`
+    // (this "server" block) and `vitest` (below) - production never runs
+    // this dev server at all (terraform/user_data.sh.tpl builds
+    // client/Dockerfile.prod, a real `vite build` served as static files),
+    // so this permissive setting has no production exposure to worry about.
     allowedHosts: true,
   },
   test: {

@@ -1,8 +1,9 @@
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
-const { publicUserSelect } = require("../utils/publicUser");
+const { groupUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
+const { assertGroupMembers } = require("../utils/assertGroupMembers");
 const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../services/categorizationService");
 const { parseExpenseText } = require("../services/expenseParsingService");
 const { emitGroupActivity } = require("../services/realtimeService");
@@ -55,6 +56,15 @@ async function createExpense(req, res, next) {
     });
     if (!membership) throw new ApiError(403, "You are not a member of this group");
 
+    // The requester being a member only proves *they* belong here - paidBy
+    // and every split participant are separate user ids the request
+    // supplies, and the database won't stop a reference to some other
+    // registered user who isn't actually in this group.
+    await assertGroupMembers(data.groupId, {
+      paidBy: [data.paidBy],
+      "splits[].userId": data.splits.map((s) => s.userId),
+    });
+
     await assertGroupNotFinalized(data.groupId);
 
     // Best-effort auto-categorization; categorizeExpense already falls back
@@ -77,7 +87,7 @@ async function createExpense(req, res, next) {
           })),
         },
       },
-      include: { splits: true, payer: { select: publicUserSelect } },
+      include: { splits: true, payer: { select: groupUserSelect } },
     });
 
     emitGroupActivity(data.groupId, { type: "expense-added", actorId: req.userId });
@@ -105,6 +115,14 @@ async function updateExpense(req, res, next) {
       throw new ApiError(403, "Only the payer can edit this expense");
     }
 
+    // Same reasoning as createExpense - paidBy/split participants are
+    // separate user ids the request supplies, not implied by the requester
+    // already being a member of this group.
+    await assertGroupMembers(existing.groupId, {
+      paidBy: [data.paidBy],
+      "splits[].userId": data.splits.map((s) => s.userId),
+    });
+
     await assertGroupNotFinalized(existing.groupId);
 
     // Only re-run categorization when the description actually changed -
@@ -131,7 +149,7 @@ async function updateExpense(req, res, next) {
           })),
         },
       },
-      include: { splits: true, payer: { select: publicUserSelect } },
+      include: { splits: true, payer: { select: groupUserSelect } },
     });
 
     emitGroupActivity(existing.groupId, { type: "expense-updated", actorId: req.userId });
@@ -164,7 +182,7 @@ async function updateExpenseCategory(req, res, next) {
     const expense = await prisma.expense.update({
       where: { id: expenseId },
       data: { category },
-      include: { splits: true, payer: { select: publicUserSelect } },
+      include: { splits: true, payer: { select: groupUserSelect } },
     });
 
     emitGroupActivity(existing.groupId, { type: "expense-category", actorId: req.userId });
@@ -215,7 +233,7 @@ async function parseExpense(req, res, next) {
 
     const members = await prisma.groupMember.findMany({
       where: { groupId },
-      include: { user: { select: publicUserSelect } },
+      include: { user: { select: groupUserSelect } },
     });
     const memberList = members.map((m) => ({ id: m.user.id, name: m.user.name }));
 

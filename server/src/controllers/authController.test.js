@@ -38,13 +38,15 @@ describe("POST /api/auth/signup", () => {
       username: "alice1",
       email: "alice@example.com",
       passwordHash: "hashed",
+      tokenVersion: 0,
     });
 
     const res = await request(app).post("/api/auth/signup").send(validBody);
 
     expect(res.status).toBe(201);
     expect(res.body.user).toEqual({ id: 1, name: "Alice", username: "alice1", email: "alice@example.com" });
-    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: 1 });
+    // tokenVersion is embedded too (see middleware/auth.js) - not just userId.
+    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: 1, tokenVersion: 0 });
   });
 
   test("rejects a username with invalid characters", async () => {
@@ -91,6 +93,7 @@ describe("POST /api/auth/login", () => {
       username: "alice1",
       email: "alice@example.com",
       passwordHash,
+      tokenVersion: 2,
     });
 
     const res = await request(app)
@@ -99,6 +102,8 @@ describe("POST /api/auth/login", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.user).toEqual({ id: 1, name: "Alice", username: "alice1", email: "alice@example.com" });
+    // tokenVersion is embedded too (see middleware/auth.js) - not just userId.
+    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: 1, tokenVersion: 2 });
   });
 
   test("rejects an unknown email", async () => {
@@ -179,6 +184,13 @@ describe("POST /api/auth/reset-password", () => {
     expect(res.status).toBe(200);
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 1 } })
+    );
+    // Security-review regression: any token issued before this reset - one
+    // that may have leaked, which could be exactly why someone's resetting
+    // their password - must stop working immediately (see middleware/
+    // auth.js's tokenVersion check), not just at its natural 7-day expiry.
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ tokenVersion: { increment: 1 } }) })
     );
     // Single-use: the token gets marked spent in the same transaction.
     expect(prisma.passwordResetToken.update).toHaveBeenCalledWith(

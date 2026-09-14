@@ -55,7 +55,13 @@ export function AuthProvider({ children }) {
   }
 
   async function changePassword(currentPassword, newPassword) {
-    await api.patch("/users/me/password", { currentPassword, newPassword });
+    // The server invalidates every previously-issued token as part of this
+    // (see userController's changePassword) - including the one that just
+    // authenticated this very request - and issues a fresh one specifically
+    // so this session survives. Store it, or the next authenticated request
+    // would 401 with the now-stale token still in localStorage.
+    const { data } = await api.patch("/users/me/password", { currentPassword, newPassword });
+    localStorage.setItem("token", data.token);
   }
 
   return (

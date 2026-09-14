@@ -13,6 +13,11 @@ model User {
   username     String   @unique
   email        String   @unique
   passwordHash String   @map("password_hash")
+  // Embedded in every issued JWT and checked on every authenticated
+  // request (see middleware/auth.js) - bumped whenever the password
+  // changes or is reset, so a stolen token stops working immediately
+  // instead of staying valid for the rest of its 7-day life.
+  tokenVersion Int      @default(0) @map("token_version")
   createdAt    DateTime @default(now()) @map("created_at")
 
   groupsOwned         Group[]              @relation("GroupOwner")

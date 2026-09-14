@@ -21,9 +21,19 @@ function initRealtime(httpServer) {
   // a "connect" event - a bad/missing token rejects the connection outright
   // (client gets "connect_error") instead of connecting and then racing a
   // forced disconnect.
-  io.use((socket, next) => {
+  // Same tokenVersion check as requireAuth (middleware/auth.js) - without
+  // it, a token invalidated by a password change/reset would still open a
+  // live WebSocket connection and keep receiving group activity, even
+  // though the same stale token is correctly rejected by the REST API.
+  io.use(async (socket, next) => {
     try {
       const payload = jwt.verify(socket.handshake.auth?.token, process.env.JWT_SECRET);
+
+      const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { tokenVersion: true } });
+      if (!user || user.tokenVersion !== payload.tokenVersion) {
+        return next(new Error("unauthorized"));
+      }
+
       socket.userId = payload.userId;
       next();
     } catch {

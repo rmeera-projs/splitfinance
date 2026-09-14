@@ -6,6 +6,7 @@ const request = require("supertest");
 jest.mock("../config/prisma", () => ({
   groupMember: { findUnique: jest.fn(), findMany: jest.fn() },
   group: { findUnique: jest.fn() },
+  user: { findUnique: jest.fn() },
   expense: {
     create: jest.fn(),
     findUnique: jest.fn(),
@@ -29,8 +30,10 @@ const prisma = require("../config/prisma");
 const { categorizeExpense } = require("../services/categorizationService");
 const { parseExpenseText } = require("../services/expenseParsingService");
 
-function tokenFor(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET);
+// tokenVersion defaults to 0, matching the requireAuth mock default set in
+// beforeEach below.
+function tokenFor(userId, tokenVersion = 0) {
+  return jwt.sign({ userId, tokenVersion }, process.env.JWT_SECRET);
 }
 
 const USER_ID = 1;
@@ -39,10 +42,17 @@ const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // requireAuth's tokenVersion check (middleware/auth.js) - every
+  // authenticated request in this file goes through it now.
+  prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0 });
   // Most tests don't care about group finalization; default to "not
   // finalized" so only the tests that specifically exercise that behavior
   // need to override it.
   prisma.group.findUnique.mockResolvedValue({ isFinalized: false });
+  // Default membership for assertGroupMembers (paidBy/split-participant
+  // validation) - USER_ID and OTHER_USER_ID both belong to the group, so
+  // only the tests specifically exercising that check need to override it.
+  prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }, { userId: OTHER_USER_ID }]);
 });
 
 describe("POST /api/expenses", () => {
@@ -69,6 +79,19 @@ describe("POST /api/expenses", () => {
     );
   });
 
+  // Security-review regression: another group member only needs to see who
+  // paid (name/username), not their email or account-creation date.
+  test("never selects email/createdAt for the nested payer", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    categorizeExpense.mockResolvedValue("Food & Drink");
+    prisma.expense.create.mockResolvedValue({ id: 1, ...validBody, category: "Food & Drink" });
+
+    await request(app).post("/api/expenses").set(AUTH).send(validBody);
+
+    const selectedFields = prisma.expense.create.mock.calls[0][0].include.payer.select;
+    expect(selectedFields).toEqual({ id: true, name: true, username: true });
+  });
+
   test("rejects when the caller is not a member of the group", async () => {
     prisma.groupMember.findUnique.mockResolvedValue(null);
 
@@ -93,6 +116,37 @@ describe("POST /api/expenses", () => {
   test("rejects an unauthenticated request", async () => {
     const res = await request(app).post("/api/expenses").send(validBody);
     expect(res.status).toBe(401);
+  });
+
+  // BOLA regression: the requester being a group member only proves *they*
+  // belong here - paidBy is a separate user id the request supplies, and
+  // Expense.paidBy references the global User table with no DB-level
+  // constraint tying it to this group's membership.
+  test("rejects a paidBy that isn't a member of the group, even though they're a real user", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    // OTHER_USER_ID is a real, registered user - just not in this group.
+    prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
+
+    const res = await request(app)
+      .post("/api/expenses")
+      .set(AUTH)
+      .send({ ...validBody, paidBy: OTHER_USER_ID, splits: [{ userId: USER_ID, amountOwed: 20 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
+  });
+
+  test("rejects a split participant who isn't a member of the group", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
+
+    const res = await request(app)
+      .post("/api/expenses")
+      .set(AUTH)
+      .send({ ...validBody, splits: [{ userId: OTHER_USER_ID, amountOwed: 20 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
   });
 
   test("rejects adding an expense to a finalized group", async () => {
@@ -171,6 +225,47 @@ describe("PATCH /api/expenses/:id", () => {
     const res = await request(app).patch("/api/expenses/999").set(AUTH).send(validBody);
 
     expect(res.status).toBe(404);
+  });
+
+  // BOLA regression - same reasoning as the create-expense tests: paidBy
+  // and split participants are separate user ids the edit request
+  // supplies, not implied by the payer-only authorization check above.
+  test("rejects reassigning paidBy to someone who isn't a member of the group", async () => {
+    prisma.expense.findUnique.mockResolvedValue({
+      id: 5,
+      groupId: 10,
+      paidBy: USER_ID,
+      description: "Dinner at Chipotle",
+      category: "Food & Drink",
+    });
+    prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
+
+    const res = await request(app)
+      .patch("/api/expenses/5")
+      .set(AUTH)
+      .send({ ...validBody, paidBy: OTHER_USER_ID, splits: [{ userId: USER_ID, amountOwed: 35 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.update).not.toHaveBeenCalled();
+  });
+
+  test("rejects a split participant who isn't a member of the group", async () => {
+    prisma.expense.findUnique.mockResolvedValue({
+      id: 5,
+      groupId: 10,
+      paidBy: USER_ID,
+      description: "Dinner at Chipotle",
+      category: "Food & Drink",
+    });
+    prisma.groupMember.findMany.mockResolvedValue([{ userId: USER_ID }]);
+
+    const res = await request(app)
+      .patch("/api/expenses/5")
+      .set(AUTH)
+      .send({ ...validBody, splits: [{ userId: OTHER_USER_ID, amountOwed: 35 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.update).not.toHaveBeenCalled();
   });
 
   test("rejects when the edited splits don't sum to the edited amount", async () => {

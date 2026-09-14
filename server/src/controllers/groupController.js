@@ -2,7 +2,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { getGroupBalances } = require("../services/balanceService");
-const { publicUserSelect } = require("../utils/publicUser");
+const { groupUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 const { emitGroupActivity } = require("../services/realtimeService");
 
@@ -52,7 +52,7 @@ async function createGroup(req, res, next) {
           ],
         },
       },
-      include: { members: { include: { user: { select: publicUserSelect } } } },
+      include: { members: { include: { user: { select: groupUserSelect } } } },
     });
 
     res.status(201).json({ ...group, unmatchedIdentifiers });
@@ -96,7 +96,7 @@ async function addMembers(req, res, next) {
 
     const group = await prisma.group.findUnique({
       where: { id: groupId },
-      include: { members: { include: { user: { select: publicUserSelect } } } },
+      include: { members: { include: { user: { select: groupUserSelect } } } },
     });
 
     if (toAdd.length > 0) {
@@ -112,7 +112,7 @@ async function listMyGroups(req, res, next) {
   try {
     const groups = await prisma.group.findMany({
       where: { members: { some: { userId: req.userId } } },
-      include: { members: { include: { user: { select: publicUserSelect } } } },
+      include: { members: { include: { user: { select: groupUserSelect } } } },
     });
     res.json(groups);
   } catch (err) {
@@ -126,9 +126,9 @@ async function getGroup(req, res, next) {
     const group = await prisma.group.findUnique({
       where: { id: groupId },
       include: {
-        members: { include: { user: { select: publicUserSelect } } },
+        members: { include: { user: { select: groupUserSelect } } },
         expenses: {
-          include: { splits: true, payer: { select: publicUserSelect } },
+          include: { splits: true, payer: { select: groupUserSelect } },
           orderBy: { date: "desc" },
         },
         settlements: true,

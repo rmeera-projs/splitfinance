@@ -80,18 +80,30 @@ RESEND_API_KEY=${resend_api_key}
 RESEND_FROM_ADDRESS=${resend_from_address}
 EOF
 
-# CLIENT_URL/JWT_SECRET/VITE_API_URL are hardcoded literals in the base
-# docker-compose.yml (they're meant to be overridden locally too - see the
-# Cloudflare tunnel instructions in README.md), so an override file is what
-# actually replaces them, the same mechanism used for local tunnel testing.
+# CLIENT_URL/JWT_SECRET are hardcoded literals in the base docker-compose.yml
+# (they're meant to be overridden locally too - see the Cloudflare tunnel
+# instructions in README.md), so an override file is what actually replaces
+# them, the same mechanism used for local tunnel testing.
+#
+# The client service is overridden more heavily: the base compose file
+# builds client/Dockerfile, which runs Vite's *dev server* - fine for local
+# dev, but never meant to be internet-facing (its own vite.config.js has an
+# allowedHosts: true comment saying exactly that). Production instead
+# builds client/Dockerfile.prod, a real `vite build` served as static files
+# by "serve" on port 4173. Vite bakes VITE_API_URL into the built JS at
+# build time, not at container start, so it has to be a build arg here
+# rather than a runtime environment variable (which is why it moved out of
+# the client `environment` block that used to be here).
 #
 # This override also adds a Caddy reverse proxy in front of both apps -
 # Caddy gets automatic HTTPS (Let's Encrypt) for free just from listing a
 # domain in its config, as long as that domain's DNS already points here
 # and ports 80/443 are reachable (both required for the ACME HTTP
-# challenge). client/server keep their direct port mappings in the base
-# compose file too, so http://${eip_address}:5173 / :5000 still work as a
-# fallback during the DNS cutover.
+# challenge). server keeps its direct port mapping in the base compose file
+# too, so http://${eip_address}:5000 still works as a fallback during the
+# DNS cutover; client's base-file mapping (5173, the dev server's port) is
+# dead in production since Dockerfile.prod doesn't listen there, so this
+# override adds the real 4173 fallback mapping alongside it.
 cat > docker-compose.override.yml <<EOF
 services:
   server:
@@ -99,8 +111,13 @@ services:
       CLIENT_URL: "https://${domain_name}"
       JWT_SECRET: "${jwt_secret}"
   client:
-    environment:
-      VITE_API_URL: "https://${api_domain_name}/api"
+    build:
+      context: ./client
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: "https://${api_domain_name}/api"
+    ports:
+      - "4173:4173"
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -146,7 +163,7 @@ ${domain_name} {
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
-	reverse_proxy client:5173
+	reverse_proxy client:4173
 }
 
 ${api_domain_name} {

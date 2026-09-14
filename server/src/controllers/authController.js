@@ -1,11 +1,11 @@
 const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { sendPasswordResetEmail } = require("../services/emailService");
 const { USERNAME_RE } = require("../utils/validators");
+const { generateToken } = require("../utils/jwt");
 
 const SALT_ROUNDS = 10;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -37,10 +37,6 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
-function generateToken(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: "7d" });
-}
-
 async function signup(req, res, next) {
   try {
     const { name, username, email, password } = signupSchema.parse(req.body);
@@ -60,7 +56,7 @@ async function signup(req, res, next) {
       data: { name, username, email, passwordHash },
     });
 
-    const token = generateToken(user.id);
+    const token = generateToken(user.id, user.tokenVersion);
     res.status(201).json({
       token,
       user: { id: user.id, name: user.name, username: user.username, email: user.email },
@@ -80,7 +76,7 @@ async function login(req, res, next) {
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) throw new ApiError(401, "Invalid email or password");
 
-    const token = generateToken(user.id);
+    const token = generateToken(user.id, user.tokenVersion);
     res.json({
       token,
       user: { id: user.id, name: user.name, username: user.username, email: user.email },
@@ -133,7 +129,14 @@ async function resetPassword(req, res, next) {
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await prisma.$transaction([
-      prisma.user.update({ where: { id: resetToken.userId }, data: { passwordHash } }),
+      // tokenVersion increments too - any token issued before this reset
+      // (e.g. one that leaked, which may be exactly why someone is
+      // resetting their password) stops working immediately, not just
+      // whenever it would have naturally expired.
+      prisma.user.update({
+        where: { id: resetToken.userId },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
+      }),
       // Single-use: mark it spent so the same link can't be replayed.
       prisma.passwordResetToken.update({ where: { id: resetToken.id }, data: { usedAt: new Date() } }),
     ]);

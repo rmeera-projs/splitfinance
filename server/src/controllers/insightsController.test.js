@@ -5,13 +5,16 @@ const request = require("supertest");
 
 jest.mock("../config/prisma", () => ({
   expenseSplit: { findMany: jest.fn() },
+  user: { findUnique: jest.fn() },
 }));
 
 const app = require("../app");
 const prisma = require("../config/prisma");
 
-function tokenFor(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET);
+// tokenVersion defaults to 0, matching the requireAuth mock default set in
+// beforeEach below.
+function tokenFor(userId, tokenVersion = 0) {
+  return jwt.sign({ userId, tokenVersion }, process.env.JWT_SECRET);
 }
 
 const USER_ID = 1;
@@ -19,6 +22,9 @@ const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // requireAuth's tokenVersion check (middleware/auth.js) - every
+  // authenticated request in this file goes through it now.
+  prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0 });
 });
 
 describe("GET /api/insights", () => {

@@ -11,16 +11,34 @@ jest.mock("../config/prisma", () => ({
 const app = require("../app");
 const prisma = require("../config/prisma");
 
-function tokenFor(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET);
+// tokenVersion defaults to 0, matching the requireAuth mock default set in
+// beforeEach below.
+function tokenFor(userId, tokenVersion = 0) {
+  return jwt.sign({ userId, tokenVersion }, process.env.JWT_SECRET);
 }
 
 const USER_ID = 1;
 const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
-const PUBLIC_USER = { id: USER_ID, name: "Alice", username: "alice1", email: "alice@example.com", createdAt: new Date() };
+const PUBLIC_USER = {
+  id: USER_ID,
+  name: "Alice",
+  username: "alice1",
+  email: "alice@example.com",
+  createdAt: new Date(),
+  tokenVersion: 0,
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // requireAuth's tokenVersion check (middleware/auth.js) calls this same
+  // prisma.user.findUnique mock (there's only one User table) before the
+  // controller's own logic ever runs - this baseline covers that call for
+  // every test in this file; individual tests below override it with
+  // whatever additional fields (passwordHash, etc.) their own controller
+  // logic needs, as long as tokenVersion: 0 stays present so both the
+  // requireAuth check and the controller's use of the same resolved value
+  // are satisfied together.
+  prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0 });
 });
 
 describe("GET /api/users/me", () => {
@@ -106,8 +124,8 @@ describe("PATCH /api/users/me", () => {
 describe("PATCH /api/users/me/password", () => {
   test("changes the password when the current one is correct", async () => {
     const currentHash = await bcrypt.hash("oldpassword", 10);
-    prisma.user.findUnique.mockResolvedValue({ id: USER_ID, passwordHash: currentHash });
-    prisma.user.update.mockResolvedValue({});
+    prisma.user.findUnique.mockResolvedValue({ id: USER_ID, passwordHash: currentHash, tokenVersion: 0 });
+    prisma.user.update.mockResolvedValue({ id: USER_ID, tokenVersion: 1 });
 
     const res = await request(app)
       .patch("/api/users/me/password")
@@ -116,17 +134,21 @@ describe("PATCH /api/users/me/password", () => {
 
     expect(res.status).toBe(200);
     expect(prisma.user.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: USER_ID } })
+      expect.objectContaining({ where: { id: USER_ID }, data: expect.objectContaining({ tokenVersion: { increment: 1 } }) })
     );
     // The new hash should actually verify against the new password, not
     // just "some string was passed" - catches a swapped-argument bug.
     const newHash = prisma.user.update.mock.calls[0][0].data.passwordHash;
     expect(await bcrypt.compare("newpassword123", newHash)).toBe(true);
+    // A fresh token is issued (carrying the bumped tokenVersion) so the
+    // requester's own session survives - see AuthContext.jsx's
+    // changePassword, which stores this over the now-stale one.
+    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: USER_ID, tokenVersion: 1 });
   });
 
   test("rejects an incorrect current password", async () => {
     const currentHash = await bcrypt.hash("oldpassword", 10);
-    prisma.user.findUnique.mockResolvedValue({ id: USER_ID, passwordHash: currentHash });
+    prisma.user.findUnique.mockResolvedValue({ id: USER_ID, passwordHash: currentHash, tokenVersion: 0 });
 
     const res = await request(app)
       .patch("/api/users/me/password")
@@ -144,6 +166,10 @@ describe("PATCH /api/users/me/password", () => {
       .send({ currentPassword: "oldpassword", newPassword: "short" });
 
     expect(res.status).toBe(400);
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    // findUnique is still called once, by requireAuth's tokenVersion check
+    // - the assertion is that the controller's own logic never gets that
+    // far, not that the mock function was never invoked at all.
+    expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 });

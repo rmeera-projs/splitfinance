@@ -6,14 +6,21 @@ const request = require("supertest");
 jest.mock("../config/prisma", () => ({
   groupMember: { findUnique: jest.fn(), findMany: jest.fn(), createMany: jest.fn() },
   group: { update: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
-  user: { findMany: jest.fn() },
+  user: { findMany: jest.fn(), findUnique: jest.fn() },
 }));
+
+jest.mock("../services/balanceService", () => ({ getGroupBalances: jest.fn() }));
 
 const app = require("../app");
 const prisma = require("../config/prisma");
+const { getGroupBalances } = require("../services/balanceService");
 
-function tokenFor(userId) {
-  return jwt.sign({ userId }, process.env.JWT_SECRET);
+// tokenVersion defaults to 0, matching the requireAuth mock default set in
+// beforeEach below - only tests that specifically exercise requireAuth's
+// tokenVersion check (none in this file; see middleware/auth.test.js) need
+// to pass a different value.
+function tokenFor(userId, tokenVersion = 0) {
+  return jwt.sign({ userId, tokenVersion }, process.env.JWT_SECRET);
 }
 
 const USER_ID = 1;
@@ -21,6 +28,9 @@ const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // requireAuth's tokenVersion check (middleware/auth.js) - every
+  // authenticated request in this file goes through it now.
+  prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0 });
 });
 
 describe("PATCH /api/groups/:id/finalize", () => {
@@ -76,6 +86,20 @@ describe("POST /api/groups", () => {
       where: { OR: [{ email: { in: ["b@x.com", "carol123"] } }, { username: { in: ["b@x.com", "carol123"] } }] },
     });
     expect(res.body.unmatchedIdentifiers).toEqual([]);
+  });
+
+  // Security-review regression: a group member only needs to see who's in
+  // the group (name/username), not their email or account-creation date -
+  // exposing that turns every member row into a PII leak, worse once
+  // combined with a user id that isn't actually theirs to see.
+  test("never selects email/createdAt for nested member users", async () => {
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.group.create.mockResolvedValue({ id: 10, name: "Trip", members: [] });
+
+    await request(app).post("/api/groups").set(AUTH).send({ name: "Trip" });
+
+    const selectedFields = prisma.group.create.mock.calls[0][0].include.members.include.user.select;
+    expect(selectedFields).toEqual({ id: true, name: true, username: true });
   });
 
   test("reports an identifier that doesn't match any registered user's email or username", async () => {
@@ -200,5 +224,69 @@ describe("POST /api/groups/:id/members", () => {
     const res = await request(app).post("/api/groups/10/members").set(AUTH).send({ memberIdentifiers: [] });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/groups/:id", () => {
+  const OTHER_USER_ID = 2;
+
+  test("returns the group with balances for a member", async () => {
+    prisma.group.findUnique.mockResolvedValue({
+      id: 10,
+      name: "Trip",
+      members: [{ userId: USER_ID, user: { id: USER_ID, name: "Alice", username: "alice1" } }],
+      expenses: [],
+      settlements: [],
+    });
+    getGroupBalances.mockResolvedValue([{ from: USER_ID, to: OTHER_USER_ID, amount: 20 }]);
+
+    const res = await request(app).get("/api/groups/10").set(AUTH);
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Trip");
+    expect(res.body.balances).toEqual([{ from: USER_ID, to: OTHER_USER_ID, amount: 20 }]);
+  });
+
+  test("rejects a non-member", async () => {
+    prisma.group.findUnique.mockResolvedValue({
+      id: 10,
+      name: "Trip",
+      members: [{ userId: OTHER_USER_ID, user: { id: OTHER_USER_ID, name: "Bob", username: "bob2" } }],
+      expenses: [],
+      settlements: [],
+    });
+
+    const res = await request(app).get("/api/groups/10").set(AUTH);
+
+    expect(res.status).toBe(403);
+    expect(getGroupBalances).not.toHaveBeenCalled();
+  });
+
+  test("404s for a group that doesn't exist", async () => {
+    prisma.group.findUnique.mockResolvedValue(null);
+
+    const res = await request(app).get("/api/groups/999").set(AUTH);
+
+    expect(res.status).toBe(404);
+  });
+
+  // Security-review regression: same reasoning as the createGroup test -
+  // members and expense payers should only expose name/username to other
+  // group members, never email or account-creation date.
+  test("never selects email/createdAt for nested member or payer users", async () => {
+    prisma.group.findUnique.mockResolvedValue({
+      id: 10,
+      name: "Trip",
+      members: [{ userId: USER_ID, user: { id: USER_ID, name: "Alice", username: "alice1" } }],
+      expenses: [],
+      settlements: [],
+    });
+    getGroupBalances.mockResolvedValue([]);
+
+    await request(app).get("/api/groups/10").set(AUTH);
+
+    const call = prisma.group.findUnique.mock.calls[0][0];
+    expect(call.include.members.include.user.select).toEqual({ id: true, name: true, username: true });
+    expect(call.include.expenses.include.payer.select).toEqual({ id: true, name: true, username: true });
   });
 });
