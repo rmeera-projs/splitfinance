@@ -20,7 +20,8 @@ expenses and settle up with the minimum number of payments.
 - **Groups** — create groups, invite members by email *or* username, and
   add more members to a group after it's already been created
 - **Expenses** — log, edit, or delete expenses (editor-only), with 3 ways to split
-  a bill: equally, by percentage, or by exact amount
+  a bill: equally, by percentage, or by exact amount, and a "Split between"
+  checkbox list to include/exclude specific members regardless of split type
 - **Auto-Categorization** — expenses are automatically tagged with one of 9 fixed
   categories using Cohere's Chat API
 - **Natural-Language Expense Entry** — type something like "Dinner $60, I
@@ -343,7 +344,7 @@ above) doesn't go through this workflow at all.
 
 ## 🧪 Testing
 
-166 tests total (94 backend, 72 frontend), with everything external mocked -
+168 tests total (94 backend, 74 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no Resend calls, no browser needed.
 
 ```bash
@@ -355,7 +356,7 @@ no live DB, no live Cohere calls, no Resend calls, no browser needed.
 cd server
 npm test
 
-# Frontend: 72 tests (Vitest + React Testing Library), with the API
+# Frontend: 74 tests (Vitest + React Testing Library), with the API
 # client, AuthContext, and the realtime socket mocked
 cd client
 npm test
