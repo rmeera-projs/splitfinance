@@ -43,4 +43,43 @@ async function getGroupBalances(groupId) {
   return simplifyDebts(rawDebts);
 }
 
-module.exports = { getGroupBalances };
+// How much `fromUserId` currently owes `toUserId` within one group, as a
+// direct pairwise total - not the debt-simplified graph from
+// getGroupBalances, which can route a person's debt through a third party
+// and so wouldn't reflect the literal amount owed between these two
+// specific people (the number a settlement between them needs to be
+// validated against).
+async function getBalanceBetweenUsers(groupId, fromUserId, toUserId) {
+  const expenses = await prisma.expense.findMany({
+    where: { groupId },
+    include: { splits: true },
+  });
+
+  const settlements = await prisma.settlement.findMany({
+    where: { groupId },
+  });
+
+  let balance = 0;
+
+  for (const expense of expenses) {
+    if (expense.paidBy === toUserId) {
+      const split = expense.splits.find((s) => s.userId === fromUserId);
+      if (split) balance += Number(split.amountOwed);
+    } else if (expense.paidBy === fromUserId) {
+      const split = expense.splits.find((s) => s.userId === toUserId);
+      if (split) balance -= Number(split.amountOwed);
+    }
+  }
+
+  for (const settlement of settlements) {
+    if (settlement.fromUser === fromUserId && settlement.toUser === toUserId) {
+      balance -= Number(settlement.amount);
+    } else if (settlement.fromUser === toUserId && settlement.toUser === fromUserId) {
+      balance += Number(settlement.amount);
+    }
+  }
+
+  return balance;
+}
+
+module.exports = { getGroupBalances, getBalanceBetweenUsers };

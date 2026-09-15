@@ -21,7 +21,14 @@ const FROM_ADDRESS = process.env.RESEND_FROM_ADDRESS || "SplitFinance <onboardin
 async function sendPasswordResetEmail(to, resetUrl) {
   const client = getClient();
   if (!client) {
-    console.warn("RESEND_API_KEY not set - skipping password reset email (link would be):", resetUrl);
+    // The reset URL contains the raw token - safe to print locally for
+    // testing, but must never land in production logs (a log aggregator
+    // exposure would otherwise hand over a live reset link).
+    if (process.env.NODE_ENV === "production") {
+      console.warn("RESEND_API_KEY not set - skipping password reset email");
+    } else {
+      console.warn("RESEND_API_KEY not set - skipping password reset email (link would be):", resetUrl);
+    }
     return false;
   }
 

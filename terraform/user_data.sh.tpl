@@ -208,6 +208,15 @@ EOF
 # Referrer-Policy specifically, the API would end up sending two
 # conflicting values for the same header instead of one consistent one.
 #
+# Content-Security-Policy lives here rather than in helmet too, for the
+# same reason: it's the browser-rendered page (this static build) that a
+# CSP actually restricts, not the JSON API's responses. style-src needs
+# 'unsafe-inline' because InsightsPanel.jsx sets inline style="" attributes
+# for its chart bars; connect-src has to name the API's own origin plus its
+# WebSocket scheme explicitly since api.splitfinance.org is a different
+# origin than this site, so 'self' alone wouldn't cover either XHR/fetch
+# calls or the Socket.IO connection to it.
+#
 # The global options block is only emitted when the ZEROSSL_EAB_KEY_ID
 # secret fetched above is non-empty (a bash conditional now, not a
 # Terraform one - these values come from SSM at boot, not template vars) -
@@ -236,6 +245,7 @@ ${domain_name} {
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://${api_domain_name} wss://${api_domain_name}; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 	}
 	reverse_proxy client:4173
 }
