@@ -241,6 +241,19 @@ review once the app was live on a real domain:
   only - its own `vite.config.js` has an `allowedHosts: true` setting that
   says as much). See Deploying for real, below, for the override that
   makes this happen.
+- **Secrets aren't baked into the EC2 instance's user-data** - Cohere/
+  Resend/JWT/Postgres/ZeroSSL secrets are SecureString parameters in SSM
+  Parameter Store (`aws_ssm_parameter.secrets` in
+  [`terraform/main.tf`](terraform/main.tf)), fetched by the instance
+  itself at boot via a narrowly-scoped IAM policy - not templated
+  directly into the boot script, which is otherwise readable in plaintext
+  by anyone in the AWS account with `ec2:DescribeInstanceAttribute`
+  permission (a wider audience than whoever can read Terraform state).
+  Postgres also no longer uses the `docker-compose.yml` default
+  (`postgres`/`postgres`) - its actual password is generated
+  (`random_password.postgres_password`) the same way `JWT_SECRET` already
+  was.
+- **CI deploys via GitHub OIDC, not a stored AWS key** - see CI/CD, below.
 
 ## 🏗️ Architecture
 
