@@ -3,10 +3,12 @@ const app = require("../../src/app");
 const prisma = require("../../src/config/prisma");
 const { signUp, createGroup, addExpense } = require("./helpers");
 
-// The money path, end to end, against real Decimal(10,2) columns. The unit
-// suite mocks Prisma, so it can only ever assert "we asked Prisma for X" -
-// it can't catch a value that survives the request but comes back from
+// The money path, end to end, against the real INTEGER cent columns. The
+// unit suite mocks Prisma, so it can only ever assert "we asked Prisma for
+// X" - it can't catch a value that survives the request but comes back from
 // Postgres as a different type or a rounded figure.
+//
+// Every amount here is cents: 9000 is $90.00.
 describe("expenses and balances against a real database", () => {
   test("splits an expense three ways and reports who owes whom", async () => {
     const alice = await signUp({ name: "Alice" });
@@ -22,12 +24,12 @@ describe("expenses and balances against a real database", () => {
     // Alice fronts $90, split evenly - so Bob and Carol owe her $30 each.
     const res = await addExpense(alice, {
       groupId: group.id,
-      amount: 90,
+      amount: 9000,
       description: "Cabin",
       splits: [
-        { userId: alice.id, amountOwed: 30 },
-        { userId: bob.id, amountOwed: 30 },
-        { userId: carol.id, amountOwed: 30 },
+        { userId: alice.id, amountOwed: 3000 },
+        { userId: bob.id, amountOwed: 3000 },
+        { userId: carol.id, amountOwed: 3000 },
       ],
     });
     expect(res.status).toBe(201);
@@ -40,7 +42,7 @@ describe("expenses and balances against a real database", () => {
     expect(balances).toHaveLength(2);
     for (const txn of balances) {
       expect(txn.to).toBe(alice.id);
-      expect(txn.amount).toBeCloseTo(30, 2);
+      expect(txn.amount).toBe(3000);
     }
     expect(balances.map((t) => t.from).sort()).toEqual([bob.id, carol.id].sort());
   });
@@ -64,9 +66,9 @@ describe("expenses and balances against a real database", () => {
     for (const [payer, ower] of pairs) {
       const res = await addExpense(payer, {
         groupId: group.id,
-        amount: 10,
+        amount: 1000,
         paidBy: payer.id,
-        splits: [{ userId: ower.id, amountOwed: 10 }],
+        splits: [{ userId: ower.id, amountOwed: 1000 }],
       });
       expect(res.status).toBe(201);
     }
@@ -76,18 +78,20 @@ describe("expenses and balances against a real database", () => {
     expect(detail.body.balances).toEqual([]);
   });
 
-  test("stores amounts as exact decimals, not drifting floats", async () => {
+  // 0.1 + 0.2 !== 0.3 is the canonical float trap, and it's exactly the
+  // shape of a two-way split of 30 cents. As integers it's 10 + 20 === 30,
+  // with nothing to round and no tolerance needed.
+  test("stores amounts as exact integer cents, not floats", async () => {
     const alice = await signUp();
     const bob = await signUp();
     const group = await createGroup(alice, { memberIdentifiers: [bob.username] });
 
-    // 0.1 + 0.2 is the canonical float-precision trap.
     const res = await addExpense(alice, {
       groupId: group.id,
-      amount: 0.3,
+      amount: 30,
       splits: [
-        { userId: alice.id, amountOwed: 0.1 },
-        { userId: bob.id, amountOwed: 0.2 },
+        { userId: alice.id, amountOwed: 10 },
+        { userId: bob.id, amountOwed: 20 },
       ],
     });
     expect(res.status).toBe(201);
@@ -97,9 +101,59 @@ describe("expenses and balances against a real database", () => {
       include: { splits: true },
     });
 
-    expect(stored.amount.toString()).toBe("0.3");
-    const owed = stored.splits.map((s) => s.amountOwed.toString()).sort();
-    expect(owed).toEqual(["0.1", "0.2"]);
+    // Plain JS numbers straight out of Postgres - not Prisma Decimal
+    // objects that stringify to "0.30", and not floats.
+    expect(stored.amount).toBe(30);
+    expect(Number.isInteger(stored.amount)).toBe(true);
+    expect(stored.splits.map((s) => s.amountOwed).sort((a, b) => a - b)).toEqual([10, 20]);
+  });
+
+  test("refuses an amount that isn't a whole number of cents", async () => {
+    const alice = await signUp();
+    const bob = await signUp();
+    const group = await createGroup(alice, { memberIdentifiers: [bob.username] });
+
+    const res = await addExpense(alice, {
+      groupId: group.id,
+      amount: 30.5,
+      splits: [
+        { userId: alice.id, amountOwed: 10.25 },
+        { userId: bob.id, amountOwed: 20.25 },
+      ],
+    });
+
+    expect(res.status).toBe(400);
+    expect(await prisma.expense.count()).toBe(0);
+  });
+
+  // A three-way split of $60.50 can't be equal in whole cents, so the
+  // remainder has to be assigned - and the stored splits must still
+  // reconcile against the stored total exactly.
+  test("keeps an unevenly-divisible split reconciled against its total", async () => {
+    const alice = await signUp();
+    const bob = await signUp();
+    const carol = await signUp();
+    const group = await createGroup(alice, {
+      memberIdentifiers: [bob.username, carol.username],
+    });
+
+    const res = await addExpense(alice, {
+      groupId: group.id,
+      amount: 6050,
+      splits: [
+        { userId: alice.id, amountOwed: 2017 },
+        { userId: bob.id, amountOwed: 2017 },
+        { userId: carol.id, amountOwed: 2016 },
+      ],
+    });
+    expect(res.status).toBe(201);
+
+    const stored = await prisma.expense.findUnique({
+      where: { id: res.body.id },
+      include: { splits: true },
+    });
+    const splitTotal = stored.splits.reduce((sum, s) => sum + s.amountOwed, 0);
+    expect(splitTotal).toBe(stored.amount);
   });
 
   test("rejects splits that don't add up to the total", async () => {
@@ -109,10 +163,10 @@ describe("expenses and balances against a real database", () => {
 
     const res = await addExpense(alice, {
       groupId: group.id,
-      amount: 100,
+      amount: 10000,
       splits: [
-        { userId: alice.id, amountOwed: 20 },
-        { userId: bob.id, amountOwed: 20 },
+        { userId: alice.id, amountOwed: 2000 },
+        { userId: bob.id, amountOwed: 2000 },
       ],
     });
 
@@ -130,8 +184,8 @@ describe("expenses and balances against a real database", () => {
 
     const created = await addExpense(alice, {
       groupId: group.id,
-      amount: 50,
-      splits: [{ userId: bob.id, amountOwed: 50 }],
+      amount: 5000,
+      splits: [{ userId: bob.id, amountOwed: 5000 }],
     });
     expect(created.status).toBe(201);
     expect(await prisma.expenseSplit.count()).toBe(1);

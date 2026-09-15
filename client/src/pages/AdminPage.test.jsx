@@ -21,7 +21,7 @@ function renderAdminPage() {
 
 const STATS = {
   totals: { users: 42, groups: 10, expenses: 137, settlements: 25 },
-  totalExpenseAmount: 4567.89,
+  totalExpenseAmount: 456789,
   recentWindowDays: 7,
   newUsers: 3,
   newGroups: 2,

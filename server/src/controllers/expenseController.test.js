@@ -38,6 +38,7 @@ function tokenFor(userId, tokenVersion = 0) {
 
 const USER_ID = 1;
 const OTHER_USER_ID = 2;
+const THIRD_USER_ID = 3;
 const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
 
 beforeEach(() => {
@@ -59,9 +60,9 @@ describe("POST /api/expenses", () => {
   const validBody = {
     groupId: 10,
     paidBy: USER_ID,
-    amount: 20,
+    amount: 2000,
     description: "Dinner at Chipotle",
-    splits: [{ userId: USER_ID, amountOwed: 20 }],
+    splits: [{ userId: USER_ID, amountOwed: 2000 }],
   };
 
   test("creates the expense with the category from categorizeExpense", async () => {
@@ -107,7 +108,79 @@ describe("POST /api/expenses", () => {
     const res = await request(app)
       .post("/api/expenses")
       .set(AUTH)
-      .send({ ...validBody, splits: [{ userId: USER_ID, amountOwed: 5 }] });
+      .send({ ...validBody, splits: [{ userId: USER_ID, amountOwed: 500 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
+  });
+
+  // Amounts used to be float dollars compared with a 0.01 tolerance, which
+  // meant splits that were off by exactly a cent sailed through on every
+  // expense. In integer cents the comparison is exact.
+  test("rejects splits that are off by a single cent", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+
+    const res = await request(app)
+      .post("/api/expenses")
+      .set(AUTH)
+      .send({ ...validBody, splits: [{ userId: USER_ID, amountOwed: 1999 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
+  });
+
+  test("accepts a three-way split whose parts can't be equal", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.groupMember.findMany.mockResolvedValue([
+      { userId: USER_ID },
+      { userId: OTHER_USER_ID },
+      { userId: THIRD_USER_ID },
+    ]);
+    prisma.expense.create.mockResolvedValue({ id: 1 });
+
+    // $60.50 three ways is 2016.666... cents each - the odd 2 cents have to
+    // land somewhere, and the total must still reconcile exactly.
+    const res = await request(app)
+      .post("/api/expenses")
+      .set(AUTH)
+      .send({
+        ...validBody,
+        amount: 6050,
+        splits: [
+          { userId: USER_ID, amountOwed: 2017 },
+          { userId: OTHER_USER_ID, amountOwed: 2017 },
+          { userId: THIRD_USER_ID, amountOwed: 2016 },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+  });
+
+  test("rejects a fractional amount, since amounts are whole cents", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+
+    const res = await request(app)
+      .post("/api/expenses")
+      .set(AUTH)
+      .send({ ...validBody, amount: 20.5, splits: [{ userId: USER_ID, amountOwed: 20.5 }] });
+
+    expect(res.status).toBe(400);
+    expect(prisma.expense.create).not.toHaveBeenCalled();
+  });
+
+  // Above INTEGER's range the database would raise an out-of-range error,
+  // which would surface as a 500 rather than a client error.
+  test("rejects an amount beyond what the column can hold", async () => {
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+
+    const res = await request(app)
+      .post("/api/expenses")
+      .set(AUTH)
+      .send({
+        ...validBody,
+        amount: 2147483648,
+        splits: [{ userId: USER_ID, amountOwed: 2147483648 }],
+      });
 
     expect(res.status).toBe(400);
     expect(prisma.expense.create).not.toHaveBeenCalled();
@@ -130,7 +203,7 @@ describe("POST /api/expenses", () => {
     const res = await request(app)
       .post("/api/expenses")
       .set(AUTH)
-      .send({ ...validBody, paidBy: OTHER_USER_ID, splits: [{ userId: USER_ID, amountOwed: 20 }] });
+      .send({ ...validBody, paidBy: OTHER_USER_ID, splits: [{ userId: USER_ID, amountOwed: 2000 }] });
 
     expect(res.status).toBe(400);
     expect(prisma.expense.create).not.toHaveBeenCalled();
@@ -143,7 +216,7 @@ describe("POST /api/expenses", () => {
     const res = await request(app)
       .post("/api/expenses")
       .set(AUTH)
-      .send({ ...validBody, splits: [{ userId: OTHER_USER_ID, amountOwed: 20 }] });
+      .send({ ...validBody, splits: [{ userId: OTHER_USER_ID, amountOwed: 2000 }] });
 
     expect(res.status).toBe(400);
     expect(prisma.expense.create).not.toHaveBeenCalled();
@@ -163,9 +236,9 @@ describe("POST /api/expenses", () => {
 describe("PATCH /api/expenses/:id", () => {
   const validBody = {
     paidBy: USER_ID,
-    amount: 35,
+    amount: 3500,
     description: "Dinner at Chipotle",
-    splits: [{ userId: USER_ID, amountOwed: 35 }],
+    splits: [{ userId: USER_ID, amountOwed: 3500 }],
   };
 
   test("keeps the existing category and skips re-categorization when the description is unchanged", async () => {
@@ -243,7 +316,7 @@ describe("PATCH /api/expenses/:id", () => {
     const res = await request(app)
       .patch("/api/expenses/5")
       .set(AUTH)
-      .send({ ...validBody, paidBy: OTHER_USER_ID, splits: [{ userId: USER_ID, amountOwed: 35 }] });
+      .send({ ...validBody, paidBy: OTHER_USER_ID, splits: [{ userId: USER_ID, amountOwed: 3500 }] });
 
     expect(res.status).toBe(400);
     expect(prisma.expense.update).not.toHaveBeenCalled();
@@ -262,7 +335,7 @@ describe("PATCH /api/expenses/:id", () => {
     const res = await request(app)
       .patch("/api/expenses/5")
       .set(AUTH)
-      .send({ ...validBody, splits: [{ userId: OTHER_USER_ID, amountOwed: 35 }] });
+      .send({ ...validBody, splits: [{ userId: OTHER_USER_ID, amountOwed: 3500 }] });
 
     expect(res.status).toBe(400);
     expect(prisma.expense.update).not.toHaveBeenCalled();
@@ -272,7 +345,7 @@ describe("PATCH /api/expenses/:id", () => {
     const res = await request(app)
       .patch("/api/expenses/5")
       .set(AUTH)
-      .send({ ...validBody, splits: [{ userId: USER_ID, amountOwed: 1 }] });
+      .send({ ...validBody, splits: [{ userId: USER_ID, amountOwed: 100 }] });
 
     expect(res.status).toBe(400);
     expect(prisma.expense.findUnique).not.toHaveBeenCalled();
@@ -424,7 +497,7 @@ describe("POST /api/expenses/parse", () => {
       { user: { id: USER_ID, name: "Alice" } },
       { user: { id: OTHER_USER_ID, name: "Bob" } },
     ]);
-    parseExpenseText.mockResolvedValue({ description: "Dinner", amount: 60, payerId: OTHER_USER_ID, splitWithIds: null });
+    parseExpenseText.mockResolvedValue({ description: "Dinner", amount: 6000, payerId: OTHER_USER_ID, splitWithIds: null });
 
     const res = await request(app)
       .post("/api/expenses/parse")
@@ -432,7 +505,7 @@ describe("POST /api/expenses/parse", () => {
       .send({ groupId: 10, text: "Dinner $60, Bob paid" });
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ description: "Dinner", amount: 60, payerId: OTHER_USER_ID, splitWithIds: null });
+    expect(res.body).toEqual({ description: "Dinner", amount: 6000, payerId: OTHER_USER_ID, splitWithIds: null });
     expect(parseExpenseText).toHaveBeenCalledWith(
       "Dinner $60, Bob paid",
       [

@@ -4,6 +4,7 @@ import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
 import { getSocket } from "../realtime/socket";
+import { parseAmountToCents, formatCents, centsToInputValue, splitEvenly } from "../utils/money";
 
 // Human-readable text for the "someone else changed this group" banner -
 // deliberately generic (not "Alice added an expense") since the payload
@@ -134,24 +135,36 @@ export default function GroupPage() {
   // Builds the {userId, amountOwed} list to send to the API, based on the
   // given split type/values. Returns null (and reports via onError) if
   // invalid. Shared by both the add-expense and edit-expense forms.
+  //
+  // `total` and every amountOwed are integer cents. The API compares the
+  // split total against the expense total with exact equality now, so every
+  // branch here has to land on the total exactly - no leftover fraction of
+  // a cent is tolerated.
   function buildSplits(members, total, type, values, onError) {
     if (type === "equal") {
-      const share = Math.round((total / members.length) * 100) / 100;
-      const splits = members.map((m) => ({ userId: m.id, amountOwed: share }));
-      // Rounding may leave a cent or two unaccounted for; dump the remainder
-      // on the first split so the total always matches exactly.
-      const diff = Math.round((total - share * members.length) * 100) / 100;
-      splits[0].amountOwed = Math.round((splits[0].amountOwed + diff) * 100) / 100;
-      return splits;
+      // splitEvenly hands out the remainder cent by cent, so this sums to
+      // `total` by construction rather than needing a correction afterwards.
+      const shares = splitEvenly(total, members.length);
+      return members.map((m, i) => ({ userId: m.id, amountOwed: shares[i] }));
     }
 
     if (type === "exact") {
-      const splits = members
-        .map((m) => ({ userId: m.id, amountOwed: Number(values[m.id] || 0) }))
+      // Each field is a typed dollar amount, so it has to be parsed rather
+      // than coerced - a value like "12.345" is a mistake worth reporting,
+      // not something to silently round.
+      const entries = members.map((m) => ({ userId: m.id, raw: values[m.id] }));
+      const invalid = entries.find((e) => e.raw && parseAmountToCents(e.raw) === null);
+      if (invalid) {
+        onError(`"${invalid.raw}" isn't a valid amount - use up to 2 decimal places`);
+        return null;
+      }
+
+      const splits = entries
+        .map((e) => ({ userId: e.userId, amountOwed: parseAmountToCents(e.raw) || 0 }))
         .filter((s) => s.amountOwed > 0);
       const sum = splits.reduce((s, x) => s + x.amountOwed, 0);
-      if (Math.abs(sum - total) > 0.01) {
-        onError(`Exact amounts must add up to $${total.toFixed(2)} (currently $${sum.toFixed(2)})`);
+      if (sum !== total) {
+        onError(`Exact amounts must add up to $${formatCents(total)} (currently $${formatCents(sum)})`);
         return null;
       }
       return splits;
@@ -168,12 +181,13 @@ export default function GroupPage() {
     }
     const splits = pctEntries.map((s) => ({
       userId: s.userId,
-      amountOwed: Math.round(((total * s.pct) / 100) * 100) / 100,
+      amountOwed: Math.round((total * s.pct) / 100),
     }));
-    // Fix rounding so the split total matches the expense total exactly.
+    // A percentage of a cent total rarely divides evenly, so the rounding
+    // above can leave the parts a cent or two off. Put the difference on the
+    // first split to land on the total exactly.
     const sum = splits.reduce((s, x) => s + x.amountOwed, 0);
-    const diff = Math.round((total - sum) * 100) / 100;
-    splits[0].amountOwed = Math.round((splits[0].amountOwed + diff) * 100) / 100;
+    splits[0].amountOwed += total - sum;
     return splits;
   }
 
@@ -188,7 +202,7 @@ export default function GroupPage() {
       const { data } = await api.post("/expenses/parse", { groupId: Number(id), text: nlText });
 
       if (data.description) setDescription(data.description);
-      setAmount(String(data.amount));
+      setAmount(centsToInputValue(data.amount));
       if (data.payerId) setPaidBy(data.payerId);
       // A mentioned subset just becomes the split-member selection now -
       // "equal" (or whatever split type is already chosen) applies to
@@ -208,7 +222,11 @@ export default function GroupPage() {
     setExpenseError("");
     if (!description.trim() || !amount) return;
 
-    const total = Number(amount);
+    const total = parseAmountToCents(amount);
+    if (total === null || total <= 0) {
+      setExpenseError("Enter a valid amount, like 12.34");
+      return;
+    }
     const members = group.members.map((m) => m.user).filter((m) => splitMembers === null || splitMembers.includes(m.id));
     if (members.length === 0) {
       setExpenseError("Select at least one person to split with");
@@ -239,7 +257,9 @@ export default function GroupPage() {
   function startEdit(exp) {
     setEditingId(exp.id);
     setEditDescription(exp.description);
-    setEditAmount(String(exp.amount));
+    // Stored cents become editable dollars in the form fields, and get
+    // parsed back on save.
+    setEditAmount(centsToInputValue(exp.amount));
     setEditPaidBy(exp.payer.id);
     // Default to "exact" and prefill with the expense's actual current
     // splits, so editing preserves the existing distribution unless the
@@ -247,7 +267,7 @@ export default function GroupPage() {
     setEditSplitType("exact");
     const initialValues = {};
     exp.splits.forEach((s) => {
-      initialValues[s.userId] = String(s.amountOwed);
+      initialValues[s.userId] = centsToInputValue(s.amountOwed);
     });
     setEditSplitValues(initialValues);
     setEditError("");
@@ -263,7 +283,11 @@ export default function GroupPage() {
     setEditError("");
     if (!editDescription.trim() || !editAmount) return;
 
-    const total = Number(editAmount);
+    const total = parseAmountToCents(editAmount);
+    if (total === null || total <= 0) {
+      setEditError("Enter a valid amount, like 12.34");
+      return;
+    }
     const members = group.members.map((m) => m.user);
     const splits = buildSplits(members, total, editSplitType, editSplitValues, setEditError);
     if (!splits) return;
@@ -309,7 +333,7 @@ export default function GroupPage() {
   // takes fromUser from the auth token, not the request body, so this is
   // only ever shown for balances where the current user is the one who owes.
   async function handleSettleUp(balance) {
-    if (!window.confirm(`Record that you paid ${nameFor(balance.to)} $${balance.amount.toFixed(2)}?`)) return;
+    if (!window.confirm(`Record that you paid ${nameFor(balance.to)} $${formatCents(balance.amount)}?`)) return;
     try {
       await api.post("/settlements", {
         groupId: Number(id),
@@ -416,7 +440,7 @@ export default function GroupPage() {
             <li key={i} className="text-sm bg-white border rounded p-2 flex items-center justify-between gap-2">
               <span>
                 <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
-                <span className="font-medium">{nameFor(b.to)}</span> ${b.amount.toFixed(2)}
+                <span className="font-medium">{nameFor(b.to)}</span> ${formatCents(b.amount)}
               </span>
               {b.from === user.id && (
                 <button
@@ -468,7 +492,7 @@ export default function GroupPage() {
         <h2 className="font-semibold mb-2">Insights</h2>
         <InsightsPanel
           items={group.expenses.map((exp) => ({
-            amount: Number(exp.amount),
+            amount: exp.amount,
             category: exp.category,
             date: exp.date,
             payer: exp.payer.name,
@@ -687,7 +711,7 @@ export default function GroupPage() {
               <li key={exp.id} className="bg-white border rounded p-3 text-sm flex items-start justify-between gap-2">
                 <div>
                   <span className="font-medium">{exp.payer.name}</span> paid{" "}
-                  <span className="font-medium">${Number(exp.amount).toFixed(2)}</span> for{" "}
+                  <span className="font-medium">${formatCents(exp.amount)}</span> for{" "}
                   {exp.description}
                   {exp.category && categories.length > 0 && (
                     <select

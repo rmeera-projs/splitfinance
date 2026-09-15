@@ -507,28 +507,28 @@ through this workflow at all.
 
 ## 🧪 Testing
 
-240 tests across three layers, deliberately rather than incidentally: a
+301 tests across three layers, deliberately rather than incidentally: a
 fast mocked layer for logic, a real-database layer for everything mocks
 structurally can't prove, and a browser layer for the flows a user actually
 performs.
 
 | Layer | Count | What's real | What's mocked |
 |---|---|---|---|
-| Unit | 219 (134 backend, 85 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
-| Integration | 14 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
-| End-to-end | 7 | everything — real browser, real API, real database | nothing |
+| Unit | 277 (170 backend, 107 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
+| Integration | 16 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
+| End-to-end | 8 | everything — real browser, real API, real database | nothing |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 134 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 85  (Vitest + React Testing Library)
+cd server && npm test        # 170 (Jest + Supertest, Prisma mocked)
+cd client && npm test        # 107 (Vitest + React Testing Library)
 ```
 
 **Integration** (`server/tests/integration/`) runs the real app against a
 real PostgreSQL, with nothing about the data layer mocked. That's what
 catches the class of bug the unit suite can't see by construction: wrong
 Prisma query shapes, migrations drifting from the schema the code expects,
-`Decimal`↔`Number` coercion, cascade deletes, unique constraints, and
+integer-cent storage and arithmetic, cascade deletes, unique constraints, and
 balance arithmetic that only means anything against persisted rows.
 
 ```bash
@@ -548,7 +548,7 @@ touches local development data.
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p splitfinance-e2e up -d --build
 cd e2e && npm install && npx playwright install chromium
-npm test                     # 7 flows
+npm test                     # 8 flows
 npm run screenshots          # regenerates the README images from the live app
 ```
 
@@ -560,13 +560,55 @@ npm run screenshots          # regenerates the README images from the live app
 users                  (id, name, username, email, password_hash, token_version, is_admin, created_at)
 groups                 (id, name, created_by, is_finalized, created_at)
 group_members          (group_id, user_id, joined_at)
-expenses               (id, group_id, paid_by, amount, description, category, date, created_at)
-expense_splits         (id, expense_id, user_id, amount_owed)
-settlements            (id, group_id, from_user, to_user, amount, date, created_at)
+expenses               (id, group_id, paid_by, amount¹, description, category, date, created_at)
+expense_splits         (id, expense_id, user_id, amount_owed¹)
+settlements            (id, group_id, from_user, to_user, amount¹, date, created_at)
 password_reset_tokens  (id, user_id, token_hash, expires_at, used_at, created_at)
 ```
 
+¹ `INTEGER`, holding **cents** rather than dollars — see Money below.
+
 See `server/prisma/schema.prisma` for the full schema.
+
+## 💵 Money
+
+Every amount in this app — in the database, over the API, and through every
+calculation — is an **integer number of cents**. `$10.23` is `1023`.
+
+Money was originally `NUMERIC(10,2)` in Postgres but became a JavaScript
+`number` the moment it was read, and binary floating point can't represent
+most decimal fractions exactly (`0.1 + 0.2 === 0.30000000000000004`). That
+had one concrete consequence worth calling out: validating that an expense's
+splits summed to its total needed a tolerance —
+
+```js
+if (Math.abs(splitTotal - data.amount) > 0.01)  // before
+```
+
+— which meant a split that was genuinely off by up to a cent passed
+validation on every expense. With integers the same check is exact:
+
+```js
+if (splitTotal !== data.amount)                 // now
+```
+
+The tolerances are gone from debt simplification too, where "settled" now
+means exactly zero instead of "within a cent" (which had been quietly
+discarding real one-cent balances).
+
+Dollars survive only at the edges — what someone types, what's rendered, and
+what Cohere returns when it reads a sentence like "Dinner $60". Those cross
+through [`money.js`](server/src/utils/money.js) (mirrored at
+[`client/src/utils/money.js`](client/src/utils/money.js)), which converts via
+*string parsing* rather than `Math.round(value * 100)`, because that
+multiplication is itself lossy: `1.005 * 100` is `100.49999999999999`, which
+rounds to `100` — the wrong cent.
+
+The other thing integers force you to be honest about is remainders. `$60.50`
+three ways is `2016.66…` cents each, which no set of equal whole cents can
+make. `splitEvenly` hands the leftover cents out one at a time, so the parts
+always reconcile against the total exactly rather than relying on a
+correction afterwards that may or may not land.
 
 ## 🗺️ Roadmap
 - [x] WebSocket-based real-time updates

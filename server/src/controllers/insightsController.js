@@ -23,7 +23,9 @@ async function getMyInsights(req, res, next) {
     });
 
     const items = splits.map((s) => ({
-      amount: Number(s.amountOwed),
+      // Cents, like every other amount the API returns - the client
+      // formats for display (client/src/utils/money.js).
+      amount: s.amountOwed,
       category: s.expense.category,
       date: s.expense.date,
       groupId: s.expense.groupId,

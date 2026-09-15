@@ -31,7 +31,7 @@ describe("GET /api/insights", () => {
   test("flattens the user's own split shares across every group into one list", async () => {
     prisma.expenseSplit.findMany.mockResolvedValue([
       {
-        amountOwed: "10.00",
+        amountOwed: 1000,
         expense: {
           category: "Food & Drink",
           date: "2026-09-01T00:00:00.000Z",
@@ -40,7 +40,7 @@ describe("GET /api/insights", () => {
         },
       },
       {
-        amountOwed: "25.50",
+        amountOwed: 2550,
         expense: {
           category: "Travel",
           date: "2026-09-05T00:00:00.000Z",
@@ -54,8 +54,8 @@ describe("GET /api/insights", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.items).toEqual([
-      { amount: 10, category: "Food & Drink", date: "2026-09-01T00:00:00.000Z", groupId: 1, groupName: "Roommates" },
-      { amount: 25.5, category: "Travel", date: "2026-09-05T00:00:00.000Z", groupId: 2, groupName: "Ski Trip" },
+      { amount: 1000, category: "Food & Drink", date: "2026-09-01T00:00:00.000Z", groupId: 1, groupName: "Roommates" },
+      { amount: 2550, category: "Travel", date: "2026-09-05T00:00:00.000Z", groupId: 2, groupName: "Ski Trip" },
     ]);
     expect(prisma.expenseSplit.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: USER_ID } })

@@ -8,7 +8,13 @@ const { emitGroupActivity } = require("../services/realtimeService");
 const createSettlementSchema = z.object({
   groupId: z.number(),
   toUser: z.number(),
-  amount: z.number().positive(),
+  // Integer cents, like every other amount on the wire - see
+  // src/utils/money.js.
+  amount: z
+    .number()
+    .int("Amounts must be given in whole cents")
+    .positive()
+    .max(2147483647, "Amount is too large"),
 });
 
 // The authenticated user is always the one who paid (fromUser).

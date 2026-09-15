@@ -103,15 +103,15 @@ describe("GroupPage - rendering", () => {
   test("shows balances, the category badge, and the group name", async () => {
     mockGroupResponse({
       data: baseGroup({
-        balances: [{ from: OTHER.id, to: ME.id, amount: 10 }],
+        balances: [{ from: OTHER.id, to: ME.id, amount: 1000 }],
         expenses: [
           {
             id: 1,
             payer: ME,
-            amount: "20",
+            amount: 2000,
             description: "Dinner at Chipotle",
             category: "Food & Drink",
-            splits: [{ userId: ME.id, amountOwed: 20 }],
+            splits: [{ userId: ME.id, amountOwed: 2000 }],
           },
         ],
       }),
@@ -153,14 +153,59 @@ describe("GroupPage - adding an expense", () => {
       expect(api.post).toHaveBeenCalledWith("/expenses", {
         groupId: 7,
         paidBy: ME.id,
-        amount: 50,
+        amount: 5000,
         description: "Groceries",
         splits: [
-          { userId: ME.id, amountOwed: 25 },
-          { userId: OTHER.id, amountOwed: 25 },
+          { userId: ME.id, amountOwed: 2500 },
+          { userId: OTHER.id, amountOwed: 2500 },
         ],
       })
     );
+  });
+
+  // An amount that doesn't divide evenly is where integer cents actually
+  // shows up for the user: $0.05 between two people can't be 2.5c each, and
+  // the API now rejects splits that don't sum to the total exactly, so the
+  // odd cent has to be assigned rather than rounded away.
+  test("assigns the odd cent when an amount doesn't divide evenly", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockResolvedValue({ data: {} });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText("Description"), "Sweets");
+    await user.type(screen.getByPlaceholderText("Amount"), "0.05");
+    await user.click(screen.getByRole("button", { name: "Add expense" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/expenses",
+        expect.objectContaining({
+          amount: 5,
+          splits: [
+            { userId: ME.id, amountOwed: 3 },
+            { userId: OTHER.id, amountOwed: 2 },
+          ],
+        })
+      )
+    );
+  });
+
+  test("rejects an amount with more precision than a cent", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.type(screen.getByPlaceholderText("Description"), "Odd");
+    await user.type(screen.getByPlaceholderText("Amount"), "10.234");
+    await user.click(screen.getByRole("button", { name: "Add expense" }));
+
+    expect(await screen.findByText(/valid amount/i)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   test("hides the add-expense form and shows a message when the group is finalized", async () => {
@@ -182,7 +227,7 @@ describe("GroupPage - natural-language expense entry", () => {
     api.post.mockImplementation((url) => {
       if (url === "/expenses/parse") {
         return Promise.resolve({
-          data: { description: "Dinner", amount: 60, payerId: OTHER.id, splitWithIds: null },
+          data: { description: "Dinner", amount: 6000, payerId: OTHER.id, splitWithIds: null },
         });
       }
       return Promise.resolve({ data: {} });
@@ -219,7 +264,7 @@ describe("GroupPage - natural-language expense entry", () => {
     api.post.mockImplementation((url) => {
       if (url === "/expenses/parse") {
         return Promise.resolve({
-          data: { description: "Pizza", amount: 20, payerId: null, splitWithIds: [ME.id, OTHER.id] },
+          data: { description: "Pizza", amount: 2000, payerId: null, splitWithIds: [ME.id, OTHER.id] },
         });
       }
       return Promise.resolve({ data: {} });
@@ -244,11 +289,11 @@ describe("GroupPage - natural-language expense entry", () => {
       expect(api.post).toHaveBeenCalledWith("/expenses", {
         groupId: 7,
         paidBy: ME.id,
-        amount: 20,
+        amount: 2000,
         description: "Pizza",
         splits: [
-          { userId: ME.id, amountOwed: 10 },
-          { userId: OTHER.id, amountOwed: 10 },
+          { userId: ME.id, amountOwed: 1000 },
+          { userId: OTHER.id, amountOwed: 1000 },
         ],
       })
     );
@@ -270,7 +315,7 @@ describe("GroupPage - natural-language expense entry", () => {
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith(
         "/expenses",
-        expect.objectContaining({ splits: [{ userId: ME.id, amountOwed: 50 }] })
+        expect.objectContaining({ splits: [{ userId: ME.id, amountOwed: 5000 }] })
       )
     );
   });
@@ -320,10 +365,10 @@ describe("GroupPage - editing and deleting an expense", () => {
         {
           id: 1,
           payer: ME,
-          amount: "20",
+          amount: 2000,
           description: "Dinner",
           category: "Food & Drink",
-          splits: [{ userId: ME.id, amountOwed: 20 }],
+          splits: [{ userId: ME.id, amountOwed: 2000 }],
         },
       ],
     });
@@ -336,18 +381,18 @@ describe("GroupPage - editing and deleting an expense", () => {
           {
             id: 1,
             payer: ME,
-            amount: "20",
+            amount: 2000,
             description: "Mine",
             category: "Other",
-            splits: [{ userId: ME.id, amountOwed: 20 }],
+            splits: [{ userId: ME.id, amountOwed: 2000 }],
           },
           {
             id: 2,
             payer: OTHER,
-            amount: "15",
+            amount: 1500,
             description: "Bob's",
             category: "Other",
-            splits: [{ userId: OTHER.id, amountOwed: 15 }],
+            splits: [{ userId: OTHER.id, amountOwed: 1500 }],
           },
         ],
       }),
@@ -384,9 +429,9 @@ describe("GroupPage - editing and deleting an expense", () => {
     await waitFor(() =>
       expect(api.patch).toHaveBeenCalledWith("/expenses/1", {
         paidBy: ME.id,
-        amount: 30,
+        amount: 3000,
         description: "Dinner",
-        splits: [{ userId: ME.id, amountOwed: 30 }],
+        splits: [{ userId: ME.id, amountOwed: 3000 }],
       })
     );
   });
@@ -421,8 +466,8 @@ describe("GroupPage - settling up", () => {
     mockGroupResponse({
       data: baseGroup({
         balances: [
-          { from: ME.id, to: OTHER.id, amount: 10 },
-          { from: OTHER.id, to: ME.id, amount: 5 },
+          { from: ME.id, to: OTHER.id, amount: 1000 },
+          { from: OTHER.id, to: ME.id, amount: 500 },
         ],
       }),
     });
@@ -436,7 +481,7 @@ describe("GroupPage - settling up", () => {
   test("records a settlement for the balance the user owes", async () => {
     const user = userEvent.setup();
     mockGroupResponse({
-      data: baseGroup({ balances: [{ from: ME.id, to: OTHER.id, amount: 10 }] }),
+      data: baseGroup({ balances: [{ from: ME.id, to: OTHER.id, amount: 1000 }] }),
     });
     api.post.mockResolvedValue({ data: {} });
 
@@ -449,7 +494,7 @@ describe("GroupPage - settling up", () => {
       expect(api.post).toHaveBeenCalledWith("/settlements", {
         groupId: 7,
         toUser: OTHER.id,
-        amount: 10,
+        amount: 1000,
       })
     );
   });
@@ -489,10 +534,10 @@ describe("GroupPage - insights includes every current member", () => {
           {
             id: 1,
             payer: ME,
-            amount: "20",
+            amount: 2000,
             description: "Dinner",
             category: "Food & Drink",
-            splits: [{ userId: ME.id, amountOwed: 20 }],
+            splits: [{ userId: ME.id, amountOwed: 2000 }],
           },
         ],
       }),
@@ -659,7 +704,7 @@ describe("GroupPage - manual category override", () => {
         {
           id: 1,
           payer,
-          amount: "20",
+          amount: 2000,
           description: "Arcade tokens",
           category: "Other",
           splits: [{ userId: payer.id, amountOwed: 20 }],

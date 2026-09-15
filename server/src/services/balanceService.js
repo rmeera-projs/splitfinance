@@ -25,7 +25,7 @@ async function getGroupBalances(groupId) {
       rawDebts.push({
         from: split.userId,
         to: expense.paidBy,
-        amount: Number(split.amountOwed),
+        amount: split.amountOwed,
       });
     }
   }
@@ -36,7 +36,7 @@ async function getGroupBalances(groupId) {
     rawDebts.push({
       from: settlement.toUser,
       to: settlement.fromUser,
-      amount: Number(settlement.amount),
+      amount: settlement.amount,
     });
   }
 
@@ -64,18 +64,18 @@ async function getBalanceBetweenUsers(groupId, fromUserId, toUserId) {
   for (const expense of expenses) {
     if (expense.paidBy === toUserId) {
       const split = expense.splits.find((s) => s.userId === fromUserId);
-      if (split) balance += Number(split.amountOwed);
+      if (split) balance += split.amountOwed;
     } else if (expense.paidBy === fromUserId) {
       const split = expense.splits.find((s) => s.userId === toUserId);
-      if (split) balance -= Number(split.amountOwed);
+      if (split) balance -= split.amountOwed;
     }
   }
 
   for (const settlement of settlements) {
     if (settlement.fromUser === fromUserId && settlement.toUser === toUserId) {
-      balance -= Number(settlement.amount);
+      balance -= settlement.amount;
     } else if (settlement.fromUser === toUserId && settlement.toUser === fromUserId) {
-      balance += Number(settlement.amount);
+      balance += settlement.amount;
     }
   }
 

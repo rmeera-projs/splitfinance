@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import api from "../api/client";
+import { formatCents } from "../utils/money";
 
 function StatCard({ label, value, sublabel }) {
   return (
@@ -54,7 +55,7 @@ export default function AdminPage() {
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
           <p className="text-sm text-emerald-900">Total money moved through expenses</p>
           <p className="text-3xl font-bold text-emerald-700">
-            ${stats.totalExpenseAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${Number(formatCents(stats.totalExpenseAmount)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
       </section>

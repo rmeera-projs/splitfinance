@@ -1,4 +1,5 @@
 const { CohereClient } = require("cohere-ai");
+const { parseAmountToCents, numberToCents } = require("../utils/money");
 
 function getClient() {
   if (!process.env.COHERE_API_KEY) return null;
@@ -56,8 +57,12 @@ function sanitizeIds(ids, validIds) {
 function sanitizeResult(parsed, members) {
   if (!parsed || typeof parsed !== "object") return null;
 
-  const amount = Number(parsed.amount);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+  // The model answers in dollars ("60.5"), because that's how the sentence
+  // it read was phrased - this is one of the few places dollars legitimately
+  // cross into the app, so convert to cents right here at the boundary
+  // rather than letting a float travel any further (see utils/money.js).
+  const amount = numberToCents(Number(parsed.amount));
+  if (amount === null || amount <= 0) return null;
 
   const validIds = new Set(members.map((m) => m.id));
   const payerId = validIds.has(parsed.payerId) ? parsed.payerId : null;
@@ -79,8 +84,12 @@ function heuristicParse(text) {
   const match = text.match(AMOUNT_RE);
   if (!match) return null;
 
-  const amount = Number(match[1]);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+  // parseAmountToCents rather than numberToCents: this one starts from the
+  // matched *string*, so it can convert exactly instead of going via a
+  // float. Returns null for anything with more than two decimal places,
+  // which is the right answer for a typed dollar amount.
+  const amount = parseAmountToCents(match[1]);
+  if (amount === null || amount <= 0) return null;
 
   const description = text.replace(match[0], "").replace(/\bpaid by\b|\bsplit with\b/gi, "").trim() || null;
 

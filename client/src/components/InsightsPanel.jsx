@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { aggregateByCategory, aggregateByDimension, aggregateByTime } from "../utils/insights";
+import { formatCents } from "../utils/money";
 
 // Plain CSS bar chart - no charting library dependency for what's just a
 // handful of horizontal bars, and it's simple to assert on in tests.
@@ -7,14 +8,16 @@ function BarList({ data }) {
   if (data.length === 0) {
     return <p className="text-xs text-gray-400">Nothing to show yet.</p>;
   }
-  const max = Math.max(...data.map((d) => d.total), 0.01);
+  // Totals are integer cents; 1 is the smallest non-zero value, and keeps
+  // the bar widths from dividing by zero when everything is $0.
+  const max = Math.max(...data.map((d) => d.total), 1);
   return (
     <ul className="space-y-2">
       {data.map((d) => (
         <li key={d.label}>
           <div className="flex justify-between text-xs mb-1">
             <span className="text-gray-700">{d.label}</span>
-            <span className="text-gray-500">{`$${d.total.toFixed(2)}`}</span>
+            <span className="text-gray-500">${formatCents(d.total)}</span>
           </div>
           <div className="h-2 bg-gray-100 rounded">
             <div

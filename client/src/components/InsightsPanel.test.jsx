@@ -4,9 +4,9 @@ import userEvent from "@testing-library/user-event";
 import InsightsPanel from "./InsightsPanel";
 
 const items = [
-  { amount: 10, category: "Food & Drink", date: "2026-01-05", payer: "Alice" },
-  { amount: 20, category: "Travel", date: "2026-02-10", payer: "Bob" },
-  { amount: 5, category: "Food & Drink", date: "2026-02-15", payer: "Alice" },
+  { amount: 1000, category: "Food & Drink", date: "2026-01-05", payer: "Alice" },
+  { amount: 2000, category: "Travel", date: "2026-02-10", payer: "Bob" },
+  { amount: 500, category: "Food & Drink", date: "2026-02-15", payer: "Alice" },
 ];
 
 // Category totals: Food & Drink=15, Travel=20.

@@ -64,9 +64,9 @@ describe("auth and access control against a real database", () => {
 
     const res = await addExpense(mallory, {
       groupId: mallorysGroup.id,
-      amount: 100,
+      amount: 10000,
       paidBy: bob.id,
-      splits: [{ userId: mallory.id, amountOwed: 100 }],
+      splits: [{ userId: mallory.id, amountOwed: 10000 }],
     });
 
     expect(res.status).toBe(400);

@@ -87,6 +87,31 @@ test("settling up clears the balance", async ({ page, browser }) => {
   await expect(page.getByText(/Everyone is settled up/)).toBeVisible();
 });
 
+// Money is integer cents end to end, so the one case worth driving through
+// a real browser is an amount that can't divide evenly: $0.05 between two
+// people is 3c and 2c, and the API rejects splits that don't sum to the
+// total exactly. If the dollars->cents->display round trip were wrong
+// anywhere, this is where it would show.
+test("splits an amount that doesn't divide evenly, down to the cent", async ({ page, browser }) => {
+  const other = uniqueUser("friend");
+  const otherContext = await browser.newContext();
+  await signUp(await otherContext.newPage(), other);
+  await otherContext.close();
+
+  await signUp(page);
+  await createGroup(page, "Corner Shop", [other.username]);
+
+  await page.getByPlaceholder("Description").first().fill("Penny sweets");
+  await page.getByPlaceholder("Amount").first().fill("0.05");
+  await page.getByRole("button", { name: "Add expense" }).click();
+
+  await expect(page.getByText("Penny sweets")).toBeVisible();
+  // The expense renders as $0.05, and the other person owes the 2c half.
+  await expect(page.getByText(/\$0\.05/).first()).toBeVisible();
+  await expect(page.getByText(/owes/).first()).toBeVisible();
+  await expect(page.getByText(/\$0\.02/).first()).toBeVisible();
+});
+
 test("a signed-out visitor is redirected to login", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login/);

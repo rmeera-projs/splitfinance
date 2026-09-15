@@ -31,7 +31,7 @@ describe("GET /api/admin/stats", () => {
     prisma.group.count.mockResolvedValueOnce(10).mockResolvedValueOnce(2); // total, then newGroups
     prisma.expense.count.mockResolvedValue(137);
     prisma.settlement.count.mockResolvedValue(25);
-    prisma.expense.aggregate.mockResolvedValue({ _sum: { amount: "4567.89" } });
+    prisma.expense.aggregate.mockResolvedValue({ _sum: { amount: 456789 } });
     prisma.user.findMany.mockResolvedValue([{ id: 1, name: "Alice", username: "alice1", createdAt: new Date() }]);
     prisma.group.findMany.mockResolvedValue([
       { id: 1, name: "Trip", createdAt: new Date(), _count: { members: 3 } },
@@ -46,7 +46,7 @@ describe("GET /api/admin/stats", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.totals).toEqual({ users: 42, groups: 10, expenses: 137, settlements: 25 });
-    expect(res.body.totalExpenseAmount).toBe(4567.89);
+    expect(res.body.totalExpenseAmount).toBe(456789);
     expect(res.body.newUsers).toBe(3);
     expect(res.body.newGroups).toBe(2);
     expect(res.body.recentUsers).toHaveLength(1);

@@ -54,16 +54,25 @@ describe("simplifyDebts", () => {
     expect(result[0]).toEqual({ from: 2, to: 4, amount: 90 });
   });
 
+  // The float version treated anything under a cent as settled, so a
+  // genuine one-cent debt disappeared instead of being reported. In integer
+  // cents "settled" is exactly zero, and a single cent is a real balance.
+  test("reports a one-cent debt instead of rounding it away", () => {
+    const result = simplifyDebts([{ from: 1, to: 2, amount: 1 }]);
+
+    expect(result).toEqual([{ from: 1, to: 2, amount: 1 }]);
+  });
+
   // The (n - 1) bound is the claim the docstring actually makes, so it's
   // worth pinning: 4 people with tangled debts must never need more than 3
   // transactions to settle.
   test("settles n people in at most (n - 1) transactions", () => {
     const debts = [
-      { from: 1, to: 2, amount: 33.33 },
-      { from: 2, to: 3, amount: 17.5 },
-      { from: 3, to: 4, amount: 42 },
-      { from: 4, to: 1, amount: 8.25 },
-      { from: 1, to: 3, amount: 12.4 },
+      { from: 1, to: 2, amount: 3333 },
+      { from: 2, to: 3, amount: 1750 },
+      { from: 3, to: 4, amount: 4200 },
+      { from: 4, to: 1, amount: 825 },
+      { from: 1, to: 3, amount: 1240 },
     ];
 
     const result = simplifyDebts(debts);

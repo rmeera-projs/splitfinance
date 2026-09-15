@@ -21,7 +21,7 @@ describe("parseExpenseText", () => {
 
     const result = await parseExpenseText("Dinner $60, Bob paid, split with everyone", MEMBERS, ALICE_ID, { client });
 
-    expect(result).toEqual({ description: "Dinner", amount: 60, payerId: 2, splitWithIds: [1, 2, 3] });
+    expect(result).toEqual({ description: "Dinner", amount: 6000, payerId: 2, splitWithIds: [1, 2, 3] });
   });
 
   test("includes the member list and marks the current user in the prompt", async () => {
@@ -43,7 +43,7 @@ describe("parseExpenseText", () => {
 
     const result = await parseExpenseText("Groceries, $32.50", MEMBERS, ALICE_ID, { client });
 
-    expect(result).toEqual({ description: "Groceries", amount: 32.5, payerId: null, splitWithIds: null });
+    expect(result).toEqual({ description: "Groceries", amount: 3250, payerId: null, splitWithIds: null });
   });
 
   test("drops a hallucinated payerId that isn't an actual group member", async () => {
@@ -71,7 +71,7 @@ describe("parseExpenseText", () => {
 
     const result = await parseExpenseText("Something for $25", MEMBERS, ALICE_ID, { client });
 
-    expect(result.amount).toBe(25);
+    expect(result.amount).toBe(2500);
   });
 
   test("falls back to a plain-text guess when the response isn't valid JSON", async () => {
@@ -79,7 +79,7 @@ describe("parseExpenseText", () => {
 
     const result = await parseExpenseText("Movie tickets $30", MEMBERS, ALICE_ID, { client });
 
-    expect(result.amount).toBe(30);
+    expect(result.amount).toBe(3000);
   });
 
   test("falls back to a plain-text guess when the Cohere call throws", async () => {
@@ -89,7 +89,7 @@ describe("parseExpenseText", () => {
 
     const result = await parseExpenseText("Taxi $18", MEMBERS, ALICE_ID, { client });
 
-    expect(result.amount).toBe(18);
+    expect(result.amount).toBe(1800);
   });
 
   test("returns null when there's no amount to find anywhere, even in the fallback", async () => {
@@ -115,7 +115,7 @@ describe("parseExpenseText", () => {
 
     try {
       const result = await parseExpenseText("Dinner at Olive Garden $45.50", MEMBERS, ALICE_ID);
-      expect(result.amount).toBe(45.5);
+      expect(result.amount).toBe(4550);
       expect(result.payerId).toBeNull();
       expect(result.splitWithIds).toBeNull();
     } finally {

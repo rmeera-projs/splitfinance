@@ -82,7 +82,9 @@ model Expense {
   id          Int      @id @default(autoincrement())
   groupId     Int      @map("group_id")
   paidBy      Int      @map("paid_by")
-  amount      Decimal  @db.Decimal(10, 2)
+  /// Integer cents, not dollars - $10.23 is stored as 1023. See
+  /// src/utils/money.js for why money never touches a float here.
+  amount      Int
   description String
   category    String   @default("Other")
   date        DateTime @default(now())
@@ -99,7 +101,8 @@ model ExpenseSplit {
   id         Int     @id @default(autoincrement())
   expenseId  Int     @map("expense_id")
   userId     Int     @map("user_id")
-  amountOwed Decimal @map("amount_owed") @db.Decimal(10, 2)
+  /// Integer cents - see Expense.amount.
+  amountOwed Int     @map("amount_owed")
 
   expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id])
@@ -112,7 +115,8 @@ model Settlement {
   groupId   Int      @map("group_id")
   fromUser  Int      @map("from_user")
   toUser    Int      @map("to_user")
-  amount    Decimal  @db.Decimal(10, 2)
+  /// Integer cents - see Expense.amount.
+  amount    Int
   date      DateTime @default(now())
   createdAt DateTime @default(now()) @map("created_at")
 

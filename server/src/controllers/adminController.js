@@ -53,7 +53,9 @@ async function getStats(req, res, next) {
         expenses: totalExpenses,
         settlements: totalSettlements,
       },
-      totalExpenseAmount: Number(expenseAmountAgg._sum.amount || 0),
+      // Cents. Prisma sums an Int column to a plain number, but it can be
+      // null when there are no expenses at all, hence the fallback.
+      totalExpenseAmount: expenseAmountAgg._sum.amount || 0,
       recentWindowDays: RECENT_WINDOW_DAYS,
       newUsers,
       newGroups,

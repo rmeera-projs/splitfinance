@@ -8,15 +8,30 @@ const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../service
 const { parseExpenseText } = require("../services/expenseParsingService");
 const { emitGroupActivity } = require("../services/realtimeService");
 
+// Every amount on the wire is integer cents, never dollars - $10.23 is
+// 1023 (see src/utils/money.js). Rejecting non-integers at the schema is
+// what lets the sum check below be exact equality instead of a tolerance.
+//
+// The ceiling is the INTEGER column's own limit ($21,474,836.47); without
+// it an oversized amount would reach Postgres and come back as an
+// out-of-range 500 rather than a clean 400.
+const MAX_AMOUNT_CENTS = 2147483647;
+
+const amountInCents = z
+  .number()
+  .int("Amounts must be given in whole cents")
+  .positive()
+  .max(MAX_AMOUNT_CENTS, "Amount is too large");
+
 const splitSchema = z.object({
   userId: z.number(),
-  amountOwed: z.number().positive(),
+  amountOwed: amountInCents,
 });
 
 const createExpenseSchema = z.object({
   groupId: z.number(),
   paidBy: z.number(),
-  amount: z.number().positive(),
+  amount: amountInCents,
   description: z.string().min(1),
   date: z.string().datetime().optional(),
   splits: z.array(splitSchema).min(1),
@@ -26,7 +41,7 @@ const createExpenseSchema = z.object({
 // groups, only edited in place.
 const updateExpenseSchema = z.object({
   paidBy: z.number(),
-  amount: z.number().positive(),
+  amount: amountInCents,
   description: z.string().min(1),
   date: z.string().datetime().optional(),
   splits: z.array(splitSchema).min(1),
@@ -45,9 +60,11 @@ async function createExpense(req, res, next) {
   try {
     const data = createExpenseSchema.parse(req.body);
 
-    // Verify the splits actually sum to the total (within a cent of rounding).
+    // Exact equality, not a tolerance: both sides are integer cents, so
+    // there's no rounding slop to absorb. The old float version allowed a
+    // discrepancy of up to a full cent through on every expense.
     const splitTotal = data.splits.reduce((sum, s) => sum + s.amountOwed, 0);
-    if (Math.abs(splitTotal - data.amount) > 0.01) {
+    if (splitTotal !== data.amount) {
       throw new ApiError(400, "Split amounts must sum to the total expense amount");
     }
 
@@ -102,8 +119,9 @@ async function updateExpense(req, res, next) {
     const expenseId = Number(req.params.id);
     const data = updateExpenseSchema.parse(req.body);
 
+    // Exact, for the same reason as createExpense above.
     const splitTotal = data.splits.reduce((sum, s) => sum + s.amountOwed, 0);
-    if (Math.abs(splitTotal - data.amount) > 0.01) {
+    if (splitTotal !== data.amount) {
       throw new ApiError(400, "Split amounts must sum to the total expense amount");
     }
 
