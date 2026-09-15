@@ -213,6 +213,14 @@ review once the app was live on a real domain:
   shapes: `publicUserSelect` (with email) is only for the authenticated
   user's own account (`GET/PATCH /api/users/me`); every other nested user -
   group members, expense payers - uses `groupUserSelect` instead.
+- **Settlements are validated against the actual balance, server-side** -
+  `createSettlement` rejects an amount that's `<= 0`, exceeds what's
+  currently owed between those two specific users
+  (`balanceService.getBalanceBetweenUsers`, a direct pairwise total - not
+  the debt-simplified group graph, which can route a person's debt through
+  a third party), runs in the wrong direction, or names the requester as
+  both parties. Partial settlements (paying off less than the full
+  balance) are intentionally still allowed.
 - **Sessions can actually be revoked** - JWTs carry a `tokenVersion` claim
   (`User.tokenVersion` in the schema) checked against the user's current
   value on every authenticated request, in both `requireAuth`
@@ -258,6 +266,19 @@ review once the app was live on a real domain:
   (`random_password.postgres_password`) the same way `JWT_SECRET` already
   was.
 - **CI deploys via GitHub OIDC, not a stored AWS key** - see CI/CD, below.
+- **A real Content-Security-Policy on the frontend** - set in Caddy
+  (`terraform/user_data.sh.tpl`), not Helmet, because it's the
+  browser-rendered static build that a CSP actually restricts, not the
+  JSON API's responses. Scoped to what the app actually needs rather than
+  loosened with `*`/`'unsafe-eval'`: `'unsafe-inline'` on `style-src` only
+  (for `InsightsPanel`'s inline chart-bar styles), and an explicit
+  `connect-src` entry for `api.splitfinance.org`'s HTTPS and WebSocket
+  origin, since it's a separate domain from the frontend.
+- **Password-reset URLs never reach production logs** -
+  [`emailService.js`](server/src/services/emailService.js) only prints the
+  raw reset link (which embeds the live token) when
+  `NODE_ENV !== "production"`; the database itself only ever stores the
+  token's SHA-256 hash, never the raw value.
 
 ## 🏗️ Architecture
 
@@ -428,11 +449,11 @@ through this workflow at all.
 
 ## 🧪 Testing
 
-212 tests total (127 backend, 85 frontend), with everything external mocked -
+219 tests total (134 backend, 85 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no Resend calls, no browser needed.
 
 ```bash
-# Backend: 127 tests (Jest + Supertest), run against the real Express app
+# Backend: 134 tests (Jest + Supertest), run against the real Express app
 # with a mocked Prisma client, mocked categorizationService/
 # expenseParsingService, and mocked emailService. A handful of these spin
 # up a real (in-process, no external network) Socket.IO server + client to
