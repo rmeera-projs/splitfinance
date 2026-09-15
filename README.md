@@ -650,6 +650,13 @@ correction afterwards that may or may not land.
 - [ ] Duplicate-expense detection - flag a newly-added expense that looks
   like an accidental double-entry of a recent one (similar description,
   amount, and date)
+- [ ] Automatic rollback for database migrations - migrations are currently
+  forward-only, so undoing one means writing a new migration by hand. The
+  integer-cents conversion made the gap concrete: reverting the application
+  code after that deploy would have left the database in cents while the
+  old code expected dollars, showing every amount 100x too large. Wants a
+  paired down-migration (and/or an automatic pre-migration dump) so a bad
+  deploy has a real escape hatch
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
 - [x] Password reset flow
