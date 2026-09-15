@@ -12,9 +12,15 @@ const rateLimit = require("express-rate-limit");
 // across every test in the same run, tripping the limit on tests that
 // deliberately hit these routes many times with no relation to a real
 // client's request rate.
+// Overridable so the end-to-end stack (docker-compose.e2e.yml) can raise it
+// - that suite legitimately signs up a dozen fresh accounts per run from one
+// address, which is exactly the pattern this limit exists to stop. Left
+// alone everywhere else, so production keeps the 10.
+const AUTH_LIMIT = Number(process.env.AUTH_RATE_LIMIT_MAX) || 10;
+
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: AUTH_LIMIT,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === "test",

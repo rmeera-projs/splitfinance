@@ -1,0 +1,43 @@
+# Dedicated stack for the Playwright end-to-end suite (e2e/).
+#
+# Used as an explicit overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up -d --build
+#
+# Naming both files explicitly matters: it stops Compose from auto-loading
+# docker-compose.override.yml, which is a gitignored, developer-local file
+# (Cloudflare tunnel URLs and the like) that would otherwise point the
+# client at whatever host that developer last used instead of at this stack.
+#
+# Differences from the normal local stack:
+#   - its own database, so a run never touches data you've been clicking
+#     through in development
+#   - its own ports, so it can run alongside that stack rather than
+#     fighting it for 5173/5000
+#   - a raised auth rate limit, because the suite legitimately creates a
+#     dozen accounts a run from a single address
+services:
+  db:
+    environment:
+      POSTGRES_DB: splitfinance_e2e
+    ports: !override
+      - "5433:5432"
+    volumes: !override
+      # A named volume would persist accounts between runs and eventually
+      # collide on the unique email/username constraints. This stack is
+      # meant to be disposable, so its data lives only as long as the
+      # container does.
+      - /var/lib/postgresql/data
+
+  server:
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/splitfinance_e2e?schema=public
+      CLIENT_URL: http://localhost:5174
+      AUTH_RATE_LIMIT_MAX: "500"
+    ports: !override
+      - "5001:5000"
+
+  client:
+    environment:
+      VITE_API_URL: http://localhost:5001/api
+    ports: !override
+      - "5174:5173"

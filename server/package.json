@@ -8,6 +8,8 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "test": "jest",
+    "test:integration": "jest --config jest.integration.config.js",
+    "test:integration:setup": "prisma migrate deploy",
     "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {

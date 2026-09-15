@@ -1,5 +1,13 @@
 node_modules/
 docker-compose.override.yml
+
+# Playwright run artefacts - traces/screenshots/video from failures, and
+# the generated HTML report. The screenshots the README embeds are NOT
+# these; those are committed under docs/screenshots/.
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
+e2e/.cache/
 .env
 .env.local
 dist/
