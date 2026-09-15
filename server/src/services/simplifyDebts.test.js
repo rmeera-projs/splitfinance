@@ -21,7 +21,7 @@ describe("simplifyDebts", () => {
     expect(result).toEqual([{ from: 1, to: 3, amount: 20 }]);
   });
 
-  test("handles multiple creditors and debtors with minimum transactions", () => {
+  test("handles multiple creditors and debtors without over-paying", () => {
     // A owes 30, B owes 10, C is owed 25, D is owed 15
     const debts = [
       { from: 1, to: 3, amount: 25 },
@@ -36,5 +36,54 @@ describe("simplifyDebts", () => {
 
   test("returns empty array for no debts", () => {
     expect(simplifyDebts([])).toEqual([]);
+  });
+
+  // The documented approach is "largest creditor against largest debtor",
+  // which only holds if the balances are actually sorted first. These debts
+  // are deliberately fed in smallest-first order, so an unsorted
+  // implementation would pair the small debtor with the small creditor and
+  // produce a different first transaction.
+  test("matches the largest debtor against the largest creditor first", () => {
+    const debts = [
+      { from: 1, to: 3, amount: 10 }, // small debtor (1) -> small creditor (3)
+      { from: 2, to: 4, amount: 90 }, // large debtor (2) -> large creditor (4)
+    ];
+
+    const result = simplifyDebts(debts);
+
+    expect(result[0]).toEqual({ from: 2, to: 4, amount: 90 });
+  });
+
+  // The (n - 1) bound is the claim the docstring actually makes, so it's
+  // worth pinning: 4 people with tangled debts must never need more than 3
+  // transactions to settle.
+  test("settles n people in at most (n - 1) transactions", () => {
+    const debts = [
+      { from: 1, to: 2, amount: 33.33 },
+      { from: 2, to: 3, amount: 17.5 },
+      { from: 3, to: 4, amount: 42 },
+      { from: 4, to: 1, amount: 8.25 },
+      { from: 1, to: 3, amount: 12.4 },
+    ];
+
+    const result = simplifyDebts(debts);
+
+    const people = new Set(debts.flatMap((d) => [d.from, d.to]));
+    expect(result.length).toBeLessThanOrEqual(people.size - 1);
+
+    // ...and everyone still ends up square: each person's net position
+    // across the simplified transactions must cancel their original one.
+    const net = (list) =>
+      list.reduce((acc, { from, to, amount }) => {
+        acc.set(from, (acc.get(from) || 0) - amount);
+        acc.set(to, (acc.get(to) || 0) + amount);
+        return acc;
+      }, new Map());
+
+    const original = net(debts);
+    const simplified = net(result);
+    for (const person of people) {
+      expect(simplified.get(person) || 0).toBeCloseTo(original.get(person) || 0, 2);
+    }
   });
 });

@@ -2,7 +2,13 @@ const { ZodError } = require("zod");
 
 // Centralized error handler. Controllers should call next(err) on failure
 // rather than crafting their own error responses, so formatting stays consistent.
-function errorHandler(err, req, res, next) {
+//
+// The unused 4th parameter is load-bearing: Express decides something is
+// error-handling middleware by checking the function's arity, so dropping
+// it would silently turn this back into an ordinary middleware that never
+// sees errors. Named with a leading underscore so the lint rule knows the
+// omission is deliberate.
+function errorHandler(err, req, res, _next) {
   console.error(err);
 
   // A failed schema.parse() throws a ZodError, not an ApiError - map it to

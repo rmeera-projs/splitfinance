@@ -1,18 +1,19 @@
 /**
- * Debt simplification: given a list of raw debts within a group, produce the
- * minimum number of transactions needed to settle all balances.
+ * Debt simplification: given a list of raw debts within a group, net them
+ * down and settle the group in at most (n - 1) transactions for n people.
  *
- * Approach (greedy max-flow matching):
+ * Approach (greedy largest-first matching):
  *   1. Reduce all pairwise debts to a single net balance per person
  *      (positive = is owed money, negative = owes money).
  *   2. Repeatedly settle the largest creditor against the largest debtor.
- *      Each settlement zeroes out at least one person's balance, so the
- *      process terminates in at most (n - 1) transactions for n people.
+ *      Each pass zeroes out at least one person's balance, so the process
+ *      terminates in at most (n - 1) transactions.
  *
- * This is a well-known heuristic (not always provably optimal in the
- * general min-transaction sense, which is NP-hard), but it's the same
- * approach Splitwise uses in practice and performs well for typical
- * group sizes.
+ * The (n - 1) bound is guaranteed. Minimising the transaction count in the
+ * general case is NP-hard (it reduces to partitioning the balances into as
+ * many zero-sum subsets as possible), so this deliberately doesn't claim to
+ * be optimal - it's the same well-known heuristic Splitwise uses in
+ * practice, and it does well for typical group sizes.
  *
  * @param {Array<{from: number, to: number, amount: number}>} debts
  *   Raw debts, e.g. [{ from: userIdA, to: userIdB, amount: 20 }, ...]
@@ -39,6 +40,15 @@ function simplifyDebts(debts) {
     if (balance > EPSILON) creditors.push({ userId, balance });
     else if (balance < -EPSILON) debtors.push({ userId, balance: -balance });
   }
+
+  // Largest balances first, so the two-pointer walk below actually matches
+  // the biggest debtor against the biggest creditor each pass. Without this
+  // the walk still settles the group within the same (n - 1) bound, but in
+  // whatever arbitrary order the debts happened to arrive in - matching
+  // large against large is what tends to zero two people out at once, and
+  // it makes the result stable regardless of expense ordering.
+  creditors.sort((a, b) => b.balance - a.balance);
+  debtors.sort((a, b) => b.balance - a.balance);
 
   const transactions = [];
   let i = 0;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -66,13 +66,22 @@ export default function GroupPage() {
   // refetch while one is open doesn't disturb it.
   const [activityNotice, setActivityNotice] = useState(null);
 
+  // useCallback so the effects below can depend on it honestly - as a plain
+  // function declaration it'd be a new reference every render, so listing it
+  // as a dependency would re-run those effects (and refetch, and rejoin the
+  // socket room) on every single render.
+  const fetchGroup = useCallback(async () => {
+    const { data } = await api.get(`/groups/${id}`);
+    setGroup(data);
+  }, [id]);
+
   useEffect(() => {
     fetchGroup();
     api
       .get("/expenses/categories")
       .then(({ data }) => setCategories(data.categories))
       .catch(() => {});
-  }, [id]);
+  }, [fetchGroup]);
 
   // Live "someone changed this group" notice via WebSocket. Joins this
   // group's room on mount and leaves it on unmount/id change - a socket
@@ -97,12 +106,7 @@ export default function GroupPage() {
       socket.emit("leave-group", id);
       socket.off("group-activity", handleActivity);
     };
-  }, [id, user.id]);
-
-  async function fetchGroup() {
-    const { data } = await api.get(`/groups/${id}`);
-    setGroup(data);
-  }
+  }, [id, user.id, fetchGroup]);
 
   function setSplitValue(userId, value) {
     setSplitValues((prev) => ({ ...prev, [userId]: value }));

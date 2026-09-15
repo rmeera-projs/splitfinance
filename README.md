@@ -1,9 +1,41 @@
 # SplitFinance - A Splitwise-Style Expense Sharing App
 
-A full-stack expense-splitting application that lets groups of people track shared
-expenses and settle up with the minimum number of payments.
+A full-stack expense-splitting app: track shared expenses across a group,
+let an AI categorise and parse them, and settle up in as few payments as
+the math allows.
 
-🔗 **Live at [splitfinance.org](https://splitfinance.org)** (API: [api.splitfinance.org](https://api.splitfinance.org/health))
+🔗 **Live at [splitfinance.org](https://splitfinance.org)** · API health check: [api.splitfinance.org](https://api.splitfinance.org/health)
+
+React (Vite) · Node/Express · PostgreSQL + Prisma · Socket.IO · Cohere ·
+Docker · Terraform on AWS EC2 · GitHub Actions CI/CD
+
+## 🏛️ How it fits together
+
+```mermaid
+flowchart LR
+    U["Browser"] -->|HTTPS| C
+
+    subgraph EC2["AWS EC2 · Docker Compose"]
+        C["Caddy<br/>auto-TLS · CSP · security headers"]
+        F["React SPA<br/>vite build, served static"]
+        A["Express API<br/>JWT auth · Prisma"]
+        DB[("PostgreSQL<br/>persistent EBS volume")]
+        C --> F
+        C --> A
+        F -->|Socket.IO| A
+        A --> DB
+    end
+
+    A --> CO["Cohere Chat API<br/>categorisation · NL parsing"]
+    A --> RE["Resend<br/>password-reset email"]
+    SSM["SSM Parameter Store<br/>secrets fetched at boot"] -.-> EC2
+    GH["GitHub Actions<br/>test · lint · deploy via OIDC"] -.-> EC2
+```
+
+Everything below is the detail — [Features](#-features) first, then the
+[algorithm](#-the-interesting-part-debt-simplification),
+[AI](#-ai-features-cohere), [security](#-security), and
+[deployment](#-deploying-for-real).
 
 ## ✨ Features
 
@@ -33,7 +65,7 @@ expenses and settle up with the minimum number of payments.
   add-expense form's fields for you to review before submitting
 - **Balances** — real-time "who owes whom" view per group
 - **Debt Simplification** — a graph-reduction algorithm that collapses a tangled
-  web of IOUs into the minimum number of transactions needed to settle a group
+  web of IOUs into at most n−1 transactions for an n-person group
 - **Settlements** — record payments between members, right from the balances view
 - **Finalize / Reopen** — lock a group to stop new expenses once a trip/bill is
   done, without blocking settling up; any member can finalize or reopen
@@ -53,13 +85,23 @@ expenses and settle up with the minimum number of payments.
 
 If Alice owes Bob $10, Bob owes Carol $10, and Carol owes Alice $10, naively
 that's 3 transactions — but the net effect is **zero**. This app implements a
-greedy min-cash-flow algorithm (`server/src/services/simplifyDebts.js`) that:
+greedy cash-flow reduction (`server/src/services/simplifyDebts.js`) that:
 
 1. Computes each member's net balance (total owed − total owing)
 2. Repeatedly matches the largest creditor with the largest debtor
-3. Produces the minimum number of payments to settle the group
+3. Settles the whole group in **at most n−1 transactions** for n people
 
-This turns an O(n²) worst-case payment graph into O(n) transactions.
+Each pass zeroes out at least one person's balance, which is what
+guarantees the n−1 bound — so an O(n²) worst-case payment graph always
+collapses to O(n) transactions.
+
+Worth being precise about what this does *not* claim: finding the true
+minimum number of transactions is NP-hard (it reduces to partitioning the
+balances into as many zero-sum subsets as possible), so this is a
+heuristic — the same one Splitwise uses in practice — not a provably
+optimal solver. It's guaranteed to settle the group correctly and to stay
+within the n−1 bound; it just isn't guaranteed to find the very shortest
+possible list of payments in every case.
 
 ## 🤖 AI Features (Cohere)
 

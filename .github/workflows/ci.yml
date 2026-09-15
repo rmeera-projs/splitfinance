@@ -12,7 +12,7 @@ on:
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend lint + tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,12 +34,19 @@ jobs:
         working-directory: server
         run: npx prisma generate
 
+      # Before the tests, so a style/correctness slip fails fast rather than
+      # after the whole suite has run. Both lint scripts use
+      # --max-warnings 0, so warnings can't quietly accumulate either.
+      - name: Lint
+        working-directory: server
+        run: npm run lint
+
       - name: Run tests
         working-directory: server
         run: npm test
 
   frontend:
-    name: Frontend tests
+    name: Frontend lint, tests, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +60,10 @@ jobs:
       - name: Install dependencies
         working-directory: client
         run: npm ci
+
+      - name: Lint
+        working-directory: client
+        run: npm run lint
 
       - name: Run tests
         working-directory: client

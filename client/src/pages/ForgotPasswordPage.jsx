@@ -29,13 +29,13 @@ export default function ForgotPasswordPage() {
         <h1 className="text-2xl font-bold mb-6 text-center">Reset your password</h1>
         {submitted ? (
           <p className="text-sm text-gray-600 text-center">
-            If an account exists for <span className="font-medium">{email}</span>, we've sent a link to
+            If an account exists for <span className="font-medium">{email}</span>, we&apos;ve sent a link to
             reset your password. Check your inbox.
           </p>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <p className="text-sm text-gray-500">
-              Enter the email on your account and we'll send you a link to reset your password.
+              Enter the email on your account and we&apos;ll send you a link to reset your password.
             </p>
             <input
               className="w-full border rounded px-3 py-2"
