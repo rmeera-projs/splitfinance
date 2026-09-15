@@ -44,6 +44,16 @@ resource "random_password" "jwt_secret" {
   special = false
 }
 
+# Replaces the docker-compose.yml default (postgres/postgres) once the
+# instance is deployed - see docker-compose.override.yml in
+# user_data.sh.tpl. Special characters excluded so it's always safe to drop
+# straight into a Postgres connection URL and a shell-quoted `ALTER USER`
+# without escaping.
+resource "random_password" "postgres_password" {
+  length  = 32
+  special = false
+}
+
 resource "tls_private_key" "ssh" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -144,6 +154,72 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# SecureString parameters holding the app's actual secrets - written once
+# by Terraform (so they still pass through state once, same as
+# random_password.jwt_secret/postgres_password already did), but no longer
+# baked directly into the EC2 instance's user-data. That distinction
+# matters: user-data is readable in plaintext by anyone in the account with
+# ec2:DescribeInstanceAttribute permission - a wider audience than whoever
+# can read Terraform state - and it persists as part of the instance's
+# launch configuration for the instance's whole lifetime. The instance
+# fetches these fresh at boot instead (see user_data.sh.tpl), via the IAM
+# policy below.
+locals {
+  ssm_secrets = {
+    cohere_api_key       = var.cohere_api_key
+    resend_api_key       = var.resend_api_key
+    jwt_secret           = random_password.jwt_secret.result
+    postgres_password    = random_password.postgres_password.result
+    zerossl_eab_key_id   = var.zerossl_eab_key_id
+    zerossl_eab_hmac_key = var.zerossl_eab_hmac_key
+  }
+}
+
+# The AWS-managed SSM key's actual key ARN - needed because kms:Decrypt
+# permission checks don't reliably resolve through an alias ARN the way
+# some other KMS actions do; resolving it via data source here avoids
+# hardcoding the key id, which isn't something Terraform otherwise knows
+# ahead of time and could differ per account/region.
+data "aws_kms_alias" "ssm" {
+  name = "alias/aws/ssm"
+}
+
+resource "aws_ssm_parameter" "secrets" {
+  for_each = local.ssm_secrets
+
+  name  = "/splitfinance/${each.key}"
+  type  = "SecureString"
+  value = each.value
+}
+
+# ssm:GetParameter alone isn't enough for a SecureString with
+# --with-decryption - the caller also needs kms:Decrypt on whichever key
+# encrypted it. These parameters use the AWS-managed alias/aws/ssm key
+# (the default when no custom key is specified), which - unlike a
+# customer-managed key - doesn't get its own resource policy to attach to,
+# so this permission has to be granted here instead, scoped to that
+# specific alias rather than every KMS key in the account.
+resource "aws_iam_role_policy" "ec2_ssm_parameters" {
+  name = "splitfinance-ec2-ssm-parameters"
+  role = aws_iam_role.ec2_ssm.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/splitfinance/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = data.aws_kms_alias.ssm.target_key_arn
+      },
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "ec2_ssm" {
   name = "splitfinance-ec2-ssm"
   role = aws_iam_role.ec2_ssm.name
@@ -205,22 +281,32 @@ resource "aws_instance" "app" {
     volume_type = "gp3"
   }
 
+  # Secrets (Cohere/Resend/JWT/Postgres/ZeroSSL) are deliberately NOT passed
+  # here - user_data.sh.tpl fetches them from SSM Parameter Store at boot
+  # instead, via this instance's own IAM role (aws_iam_role_policy.
+  # ec2_ssm_parameters), so they never appear in this instance's user-data
+  # in plaintext. Only non-sensitive config (domain names, the repo to
+  # clone, etc.) is templated directly.
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    eip_address          = aws_eip.app.public_ip
-    jwt_secret           = random_password.jwt_secret.result
-    cohere_api_key       = var.cohere_api_key
-    resend_api_key       = var.resend_api_key
-    resend_from_address  = var.resend_from_address
-    domain_name          = var.domain_name
-    api_domain_name      = var.api_domain_name
-    zerossl_eab_key_id   = var.zerossl_eab_key_id
-    zerossl_eab_hmac_key = var.zerossl_eab_hmac_key
-    postgres_volume_id   = aws_ebs_volume.postgres_data.id
-    repo_url             = var.repo_url
-    repo_branch          = var.repo_branch
+    eip_address         = aws_eip.app.public_ip
+    aws_region          = var.aws_region
+    resend_from_address = var.resend_from_address
+    domain_name         = var.domain_name
+    api_domain_name     = var.api_domain_name
+    postgres_volume_id  = aws_ebs_volume.postgres_data.id
+    repo_url            = var.repo_url
+    repo_branch         = var.repo_branch
   })
   # Re-run the boot script (and thus redeploy) whenever these inputs change.
   user_data_replace_on_change = true
+
+  # Not otherwise implied by any argument above - user_data.sh.tpl fetches
+  # from SSM Parameter Store by a hardcoded name/path at boot, which
+  # Terraform can't see as a reference the way it would a templated value,
+  # so the ordering has to be spelled out explicitly. Without this, the
+  # instance could boot and start fetching before the parameters (or the
+  # IAM policy granting it permission to read them) exist yet.
+  depends_on = [aws_ssm_parameter.secrets, aws_iam_role_policy.ec2_ssm_parameters]
 
   tags = { Name = "splitfinance-app" }
 }

@@ -10,12 +10,51 @@ exec > >(tee -a /var/log/user-data.log) 2>&1
 # from Docker's official install script instead (bundles docker-ce +
 # the compose plugin together, and is what Docker itself recommends).
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg git
+apt-get install -y ca-certificates curl gnupg git awscli
 curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
 sh /tmp/get-docker.sh
 systemctl enable docker
 systemctl start docker
 usermod -aG docker ubuntu
+
+# --- Secrets ---
+# Fetched fresh from SSM Parameter Store (terraform/main.tf's
+# aws_ssm_parameter.secrets) via this instance's own IAM role, rather than
+# being embedded directly in this script the way they used to be. That
+# distinction matters: this script becomes the EC2 instance's user-data,
+# readable in plaintext by anyone in the account with
+# ec2:DescribeInstanceAttribute permission - a wider audience than whoever
+# can read Terraform state, and it persists for the instance's whole
+# lifetime, not just this one boot.
+# A few retries in case the instance's IAM role credentials haven't
+# finished propagating to the metadata service yet - unlikely this far
+# into boot (after the apt/Docker install above), but a failure here has
+# no fallback, unlike most other steps in this script.
+fetch_secret() {
+  for i in $(seq 1 5); do
+    value=$(aws ssm get-parameter --name "/splitfinance/$1" --with-decryption \
+      --region "${aws_region}" --query "Parameter.Value" --output text 2>/dev/null) && break
+    sleep 3
+  done
+  echo "$value"
+}
+COHERE_API_KEY=$(fetch_secret cohere_api_key)
+RESEND_API_KEY=$(fetch_secret resend_api_key)
+JWT_SECRET_VALUE=$(fetch_secret jwt_secret)
+POSTGRES_PASSWORD_VALUE=$(fetch_secret postgres_password)
+ZEROSSL_EAB_KEY_ID=$(fetch_secret zerossl_eab_key_id)
+ZEROSSL_EAB_HMAC_KEY=$(fetch_secret zerossl_eab_hmac_key)
+
+# Unlike Cohere/Resend/ZeroSSL (all optional - the app or Caddy just falls
+# back gracefully when one is blank, same as before this change), an empty
+# JWT secret or Postgres password wouldn't fail loudly - auth would "work"
+# with a trivially-guessable secret, or the db/server containers would
+# crash-loop on a bad connection string. Both are worth stopping the boot
+# over outright if SSM never returned a value after fetch_secret's retries.
+if [ -z "$JWT_SECRET_VALUE" ] || [ -z "$POSTGRES_PASSWORD_VALUE" ]; then
+  echo "ERROR: failed to fetch jwt_secret or postgres_password from SSM Parameter Store" >&2
+  exit 1
+fi
 
 # --- Swap: the free-tier t3.micro only has 1GB RAM, and `docker compose
 # build` (npm install + vite build inside the client image) can briefly
@@ -84,8 +123,8 @@ cd /opt/splitfinance
 # .env from the project root automatically). Written even if empty, so
 # `docker compose` doesn't warn about an unset variable.
 cat > .env <<EOF
-COHERE_API_KEY=${cohere_api_key}
-RESEND_API_KEY=${resend_api_key}
+COHERE_API_KEY=$COHERE_API_KEY
+RESEND_API_KEY=$RESEND_API_KEY
 RESEND_FROM_ADDRESS=${resend_from_address}
 EOF
 
@@ -115,10 +154,14 @@ EOF
 # override adds the real 4173 fallback mapping alongside it.
 cat > docker-compose.override.yml <<EOF
 services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: "$POSTGRES_PASSWORD_VALUE"
   server:
     environment:
       CLIENT_URL: "https://${domain_name}"
-      JWT_SECRET: "${jwt_secret}"
+      JWT_SECRET: "$JWT_SECRET_VALUE"
+      DATABASE_URL: "postgresql://postgres:$POSTGRES_PASSWORD_VALUE@db:5432/splitfinance?schema=public"
   client:
     build:
       context: ./client
@@ -165,24 +208,28 @@ EOF
 # Referrer-Policy specifically, the API would end up sending two
 # conflicting values for the same header instead of one consistent one.
 #
-# The global options block is only emitted when zerossl_eab_key_id is set -
+# The global options block is only emitted when the ZEROSSL_EAB_KEY_ID
+# secret fetched above is non-empty (a bash conditional now, not a
+# Terraform one - these values come from SSM at boot, not template vars) -
 # an escape hatch for when Let's Encrypt's rate limit (5 certs per exact
 # domain set per 7 days) is exhausted, e.g. by several instance
 # replacements in a row before certs were persisted (see the comment on
 # the EBS volume above). ZeroSSL is a separate, free, browser-trusted CA
-# with its own independent limit. Leaving both terraform variables blank
-# (the default) omits this block entirely and Caddy uses Let's Encrypt as
-# normal.
-cat > Caddyfile <<EOF
-%{ if zerossl_eab_key_id != "" }
-{
+# with its own independent limit. Leaving both SSM parameters blank (the
+# default) omits this block entirely and Caddy uses Let's Encrypt as normal.
+ACME_CONFIG=""
+if [ -n "$ZEROSSL_EAB_KEY_ID" ]; then
+  ACME_CONFIG="{
 	acme_ca https://acme.zerossl.com/v2/DV90
 	acme_eab {
-		key_id ${zerossl_eab_key_id}
-		mac_key ${zerossl_eab_hmac_key}
+		key_id $ZEROSSL_EAB_KEY_ID
+		mac_key $ZEROSSL_EAB_HMAC_KEY
 	}
-}
-%{ endif }
+}"
+fi
+
+cat > Caddyfile <<EOF
+$ACME_CONFIG
 ${domain_name} {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

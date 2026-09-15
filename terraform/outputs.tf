@@ -26,3 +26,15 @@ output "ssh_command" {
 output "instance_id" {
   value = aws_instance.app.id
 }
+
+# Needed once, right after a `terraform apply -target=random_password.
+# postgres_password ...`: retrieve via `terraform output -raw
+# postgres_password` and set it on the live database with `ALTER USER`
+# *before* applying the rest of the plan (the instance replacement), so
+# the new instance's DATABASE_URL matches what Postgres actually has on
+# record. Not otherwise printed anywhere by default - `terraform output`
+# without -raw redacts it, matching every other sensitive value here.
+output "postgres_password" {
+  value     = random_password.postgres_password.result
+  sensitive = true
+}
