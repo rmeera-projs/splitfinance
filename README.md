@@ -472,6 +472,9 @@ See `server/prisma/schema.prisma` for the full schema.
   between" checkbox list (defaulting to everyone) now applies to every
   split type, including "equal" - excluding someone no longer requires the
   exact/percentage workaround of leaving their amount blank
+- [x] Admin dashboard - platform-wide counts (users, groups, expenses,
+  settlements, total money moved) and a recent-signups/recent-groups
+  glance, gated behind a `User.isAdmin` flag
 - [ ] Settle up a custom (partial) amount - settling currently always pays
   off a balance in full; there's no way to record a partial payment toward
   what you owe someone
