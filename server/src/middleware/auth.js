@@ -18,16 +18,33 @@ async function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { tokenVersion: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { tokenVersion: true, isAdmin: true },
+    });
     if (!user || user.tokenVersion !== payload.tokenVersion) {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
     req.userId = payload.userId;
+    // Free to grab here - this query already runs on every authenticated
+    // request for the tokenVersion check above, so requireAdmin below
+    // doesn't need a second DB round trip.
+    req.isAdmin = user.isAdmin;
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 }
 
-module.exports = { requireAuth };
+// Must run after requireAuth (relies on req.isAdmin, which only requireAuth
+// sets) - a 403, not a 404, so a non-admin gets a clear "you can't do this"
+// rather than the endpoint appearing not to exist.
+function requireAdmin(req, res, next) {
+  if (!req.isAdmin) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin };

@@ -14,7 +14,7 @@
 // groupUserSelect is what every *other* user nested in a response should
 // use instead - group members, expense payers, split participants - name/
 // username only, no email or account-creation timestamp.
-const publicUserSelect = { id: true, name: true, username: true, email: true, createdAt: true };
+const publicUserSelect = { id: true, name: true, username: true, email: true, isAdmin: true, createdAt: true };
 const groupUserSelect = { id: true, name: true, username: true };
 
 module.exports = { publicUserSelect, groupUserSelect };

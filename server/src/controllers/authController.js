@@ -59,7 +59,7 @@ async function signup(req, res, next) {
     const token = generateToken(user.id, user.tokenVersion);
     res.status(201).json({
       token,
-      user: { id: user.id, name: user.name, username: user.username, email: user.email },
+      user: { id: user.id, name: user.name, username: user.username, email: user.email, isAdmin: user.isAdmin },
     });
   } catch (err) {
     next(err);
@@ -79,7 +79,7 @@ async function login(req, res, next) {
     const token = generateToken(user.id, user.tokenVersion);
     res.json({
       token,
-      user: { id: user.id, name: user.name, username: user.username, email: user.email },
+      user: { id: user.id, name: user.name, username: user.username, email: user.email, isAdmin: user.isAdmin },
     });
   } catch (err) {
     next(err);

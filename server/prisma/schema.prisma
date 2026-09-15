@@ -18,6 +18,10 @@ model User {
   // changes or is reset, so a stolen token stops working immediately
   // instead of staying valid for the rest of its 7-day life.
   tokenVersion Int      @default(0) @map("token_version")
+  // Gates access to the admin dashboard (server/src/controllers/
+  // adminController.js) - platform-wide stats, not scoped to any group.
+  // No self-service way to become an admin; set directly in the database.
+  isAdmin      Boolean  @default(false) @map("is_admin")
   createdAt    DateTime @default(now()) @map("created_at")
 
   groupsOwned         Group[]              @relation("GroupOwner")

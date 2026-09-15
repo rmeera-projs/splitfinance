@@ -12,6 +12,10 @@ expenses and settle up with the minimum number of payments.
 - **Account Management** — a dedicated Account page (linked from the main
   menu on every page) for updating your name, username, or email, and for
   changing your password (requires the current one)
+- **Admin Dashboard** — platform-wide counts (users, groups, expenses,
+  settlements, total money moved) and a recent-signups/recent-groups
+  glance, gated behind a `User.isAdmin` flag with no self-service way to
+  set it (set directly in the database)
 - **Password Reset** — a self-service "forgot password" flow: request a
   link by email, click it, set a new password. Reset tokens are single-use,
   expire in 1 hour, and the request endpoint responds identically whether
@@ -267,8 +271,8 @@ splitfinance/
 ```
 
 ### API Surface
-20 REST endpoints across 6 resources (auth, users, groups, expenses,
-settlements, insights) - see `server/src/routes/`.
+21 REST endpoints across 7 resources (auth, users, groups, expenses,
+settlements, insights, admin) - see `server/src/routes/`.
 
 ### Tech Stack
 | Layer | Choice |
@@ -424,11 +428,11 @@ through this workflow at all.
 
 ## 🧪 Testing
 
-195 tests total (121 backend, 74 frontend), with everything external mocked -
+212 tests total (127 backend, 85 frontend), with everything external mocked -
 no live DB, no live Cohere calls, no Resend calls, no browser needed.
 
 ```bash
-# Backend: 121 tests (Jest + Supertest), run against the real Express app
+# Backend: 127 tests (Jest + Supertest), run against the real Express app
 # with a mocked Prisma client, mocked categorizationService/
 # expenseParsingService, and mocked emailService. A handful of these spin
 # up a real (in-process, no external network) Socket.IO server + client to
@@ -436,7 +440,7 @@ no live DB, no live Cohere calls, no Resend calls, no browser needed.
 cd server
 npm test
 
-# Frontend: 74 tests (Vitest + React Testing Library), with the API
+# Frontend: 85 tests (Vitest + React Testing Library), with the API
 # client, AuthContext, and the realtime socket mocked
 cd client
 npm test
@@ -447,7 +451,7 @@ npm test
 7 tables:
 
 ```
-users                  (id, name, username, email, password_hash, token_version, created_at)
+users                  (id, name, username, email, password_hash, token_version, is_admin, created_at)
 groups                 (id, name, created_by, is_finalized, created_at)
 group_members          (group_id, user_id, joined_at)
 expenses               (id, group_id, paid_by, amount, description, category, date, created_at)

@@ -37,6 +37,15 @@ export default function NavBar() {
 
           {menuOpen && (
             <div className="absolute right-0 mt-2 w-40 bg-white border rounded shadow-lg py-1 text-sm z-10">
+              {user?.isAdmin && (
+                <Link
+                  to="/admin"
+                  onClick={() => setMenuOpen(false)}
+                  className="block px-3 py-2 hover:bg-gray-50"
+                >
+                  Admin
+                </Link>
+              )}
               <Link
                 to="/account"
                 onClick={() => setMenuOpen(false)}

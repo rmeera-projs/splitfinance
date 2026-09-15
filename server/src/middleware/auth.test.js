@@ -9,7 +9,7 @@ jest.mock("../config/prisma", () => ({
 }));
 
 const prisma = require("../config/prisma");
-const { requireAuth } = require("./auth");
+const { requireAuth, requireAdmin } = require("./auth");
 
 function tokenFor(userId, tokenVersion) {
   return jwt.sign({ userId, tokenVersion }, process.env.JWT_SECRET);
@@ -20,6 +20,7 @@ function tokenFor(userId, tokenVersion) {
 function buildApp() {
   const app = express();
   app.get("/protected", requireAuth, (req, res) => res.json({ userId: req.userId }));
+  app.get("/admin-only", requireAuth, requireAdmin, (req, res) => res.json({ ok: true }));
   return app;
 }
 
@@ -77,5 +78,27 @@ describe("requireAuth", () => {
       .set("Authorization", `Bearer ${tokenFor(1, 0)}`);
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe("requireAdmin", () => {
+  test("allows an admin through", async () => {
+    prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, isAdmin: true });
+
+    const res = await request(buildApp())
+      .get("/admin-only")
+      .set("Authorization", `Bearer ${tokenFor(1, 0)}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test("rejects a non-admin with 403, not 404", async () => {
+    prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, isAdmin: false });
+
+    const res = await request(buildApp())
+      .get("/admin-only")
+      .set("Authorization", `Bearer ${tokenFor(1, 0)}`);
+
+    expect(res.status).toBe(403);
   });
 });

@@ -64,4 +64,24 @@ describe("NavBar", () => {
 
     expect(screen.queryByRole("link", { name: "Account" })).not.toBeInTheDocument();
   });
+
+  test("hides the Admin link for a non-admin user", async () => {
+    const user = userEvent.setup();
+    useAuth.mockReturnValue({ user: { name: "Alice", isAdmin: false }, logout: vi.fn() });
+
+    renderNavBar();
+    await user.click(screen.getByText("Alice"));
+
+    expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+  });
+
+  test("shows the Admin link for an admin user", async () => {
+    const user = userEvent.setup();
+    useAuth.mockReturnValue({ user: { name: "Alice", isAdmin: true }, logout: vi.fn() });
+
+    renderNavBar();
+    await user.click(screen.getByText("Alice"));
+
+    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+  });
 });

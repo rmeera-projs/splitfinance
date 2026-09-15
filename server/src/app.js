@@ -8,6 +8,7 @@ const groupRoutes = require("./routes/groupRoutes");
 const expenseRoutes = require("./routes/expenseRoutes");
 const settlementRoutes = require("./routes/settlementRoutes");
 const insightsRoutes = require("./routes/insightsRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const { errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
@@ -44,6 +45,7 @@ app.use("/api/groups", groupRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/settlements", settlementRoutes);
 app.use("/api/insights", insightsRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use(errorHandler);
 
