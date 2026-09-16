@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
 
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -34,8 +35,16 @@ app.set("trust proxy", 1);
 // helmet sets by default still applies: HSTS, X-Content-Type-Options,
 // X-Frame-Options, and turning off the X-Powered-By: Express header.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
-app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
+
+// credentials: true is what lets the browser send the HttpOnly session
+// cookie (utils/authCookie.js) on the frontend's cross-origin calls to this
+// API, and it is incompatible with a wildcard origin - the CORS spec
+// forbids pairing "*" with credentials, and browsers reject the response
+// outright. So the fallback here is a concrete localhost origin rather than
+// the "*" this used to allow; production sets CLIENT_URL explicitly.
+app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173", credentials: true }));
 app.use(express.json());
+app.use(cookieParser());
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 

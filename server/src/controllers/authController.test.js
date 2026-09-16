@@ -23,6 +23,15 @@ function hashToken(rawToken) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
+// Pulls the session cookie off a response so tests can assert on both the
+// token it carries and the flags that make it worth using - the token isn't
+// in the response body any more, by design.
+function sessionCookie(res) {
+  const raw = (res.headers["set-cookie"] || []).find((c) => c.startsWith("session="));
+  if (!raw) return null;
+  return { raw, token: decodeURIComponent(raw.split(";")[0].split("=")[1]) };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -30,7 +39,7 @@ beforeEach(() => {
 describe("POST /api/auth/signup", () => {
   const validBody = { name: "Alice", username: "alice1", email: "alice@example.com", password: "password123" };
 
-  test("creates an account and returns a token with the username included", async () => {
+  test("creates an account and starts a session via an HttpOnly cookie", async () => {
     prisma.user.findFirst.mockResolvedValue(null);
     prisma.user.create.mockResolvedValue({
       id: 1,
@@ -45,8 +54,37 @@ describe("POST /api/auth/signup", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.user).toEqual({ id: 1, name: "Alice", username: "alice1", email: "alice@example.com" });
+
+    // The token must not come back in the body any more - a body the client
+    // can read is a token the client can store, which is exactly what the
+    // cookie is there to prevent.
+    expect(res.body.token).toBeUndefined();
+
+    const cookie = sessionCookie(res);
+    expect(cookie).not.toBeNull();
     // tokenVersion is embedded too (see middleware/auth.js) - not just userId.
-    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: 1, tokenVersion: 0 });
+    expect(jwt.verify(cookie.token, process.env.JWT_SECRET)).toMatchObject({ userId: 1, tokenVersion: 0 });
+  });
+
+  // The flags are the whole security value of moving off localStorage, so
+  // they're worth asserting directly rather than assuming.
+  test("sets the session cookie HttpOnly and SameSite=Lax", async () => {
+    prisma.user.findFirst.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({
+      id: 1,
+      name: "Alice",
+      username: "alice1",
+      email: "alice@example.com",
+      passwordHash: "hashed",
+      tokenVersion: 0,
+    });
+
+    const res = await request(app).post("/api/auth/signup").send(validBody);
+
+    const { raw } = sessionCookie(res);
+    expect(raw).toMatch(/HttpOnly/i);
+    expect(raw).toMatch(/SameSite=Lax/i);
+    expect(raw).toMatch(/Path=\//i);
   });
 
   test("rejects a username with invalid characters", async () => {
@@ -102,8 +140,12 @@ describe("POST /api/auth/login", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.user).toEqual({ id: 1, name: "Alice", username: "alice1", email: "alice@example.com" });
+    expect(res.body.token).toBeUndefined();
     // tokenVersion is embedded too (see middleware/auth.js) - not just userId.
-    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: 1, tokenVersion: 2 });
+    expect(jwt.verify(sessionCookie(res).token, process.env.JWT_SECRET)).toMatchObject({
+      userId: 1,
+      tokenVersion: 2,
+    });
   });
 
   test("rejects an unknown email", async () => {
@@ -250,5 +292,29 @@ describe("POST /api/auth/reset-password", () => {
 
     expect(res.status).toBe(400);
     expect(prisma.passwordResetToken.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/logout", () => {
+  test("clears the session cookie", async () => {
+    const res = await request(app).post("/api/auth/logout");
+
+    expect(res.status).toBe(200);
+
+    const raw = (res.headers["set-cookie"] || []).find((c) => c.startsWith("session="));
+    expect(raw).toBeDefined();
+    // Expiring a cookie means sending it back empty with a past expiry -
+    // there's no other way to remove one from the browser.
+    expect(raw).toMatch(/session=;/);
+    expect(raw).toMatch(/Expires=Thu, 01 Jan 1970/i);
+  });
+
+  // Someone whose session has already expired or been invalidated still
+  // needs to clear the stale cookie, and requireAuth would turn that into a
+  // 401 before they got the chance - so logout is deliberately open.
+  test("works without a valid session", async () => {
+    const res = await request(app).post("/api/auth/logout").set("Cookie", "session=not-a-real-token");
+
+    expect(res.status).toBe(200);
   });
 });

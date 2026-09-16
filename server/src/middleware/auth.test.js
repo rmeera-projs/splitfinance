@@ -3,6 +3,7 @@ process.env.JWT_SECRET = "test-secret";
 const jwt = require("jsonwebtoken");
 const request = require("supertest");
 const express = require("express");
+const cookieParser = require("cookie-parser");
 
 jest.mock("../config/prisma", () => ({
   user: { findUnique: jest.fn() },
@@ -17,8 +18,11 @@ function tokenFor(userId, tokenVersion) {
 
 // A minimal app wrapping only requireAuth + a trivial protected route -
 // exercises the real middleware without pulling in any controller.
+// cookieParser is genuinely required rather than incidental: requireAuth
+// reads the session from req.cookies, which stays undefined without it.
 function buildApp() {
   const app = express();
+  app.use(cookieParser());
   app.get("/protected", requireAuth, (req, res) => res.json({ userId: req.userId }));
   app.get("/admin-only", requireAuth, requireAdmin, (req, res) => res.json({ ok: true }));
   return app;
@@ -34,25 +38,27 @@ describe("requireAuth", () => {
 
     const res = await request(buildApp())
       .get("/protected")
-      .set("Authorization", `Bearer ${tokenFor(1, 3)}`);
+      .set("Cookie", `session=${tokenFor(1, 3)}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ userId: 1 });
   });
 
-  test("rejects a missing Authorization header", async () => {
+  test("rejects a request with no session cookie", async () => {
     const res = await request(buildApp()).get("/protected");
     expect(res.status).toBe(401);
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  test("rejects a malformed Authorization header (not Bearer)", async () => {
-    const res = await request(buildApp()).get("/protected").set("Authorization", "Basic abc123");
+  // A cookie header that carries other cookies but not ours is the same
+  // situation as no cookie at all - there is no session to verify.
+  test("rejects a cookie header without the session cookie", async () => {
+    const res = await request(buildApp()).get("/protected").set("Cookie", "theme=dark; other=1");
     expect(res.status).toBe(401);
   });
 
   test("rejects an invalid/garbage token", async () => {
-    const res = await request(buildApp()).get("/protected").set("Authorization", "Bearer not-a-real-token");
+    const res = await request(buildApp()).get("/protected").set("Cookie", "session=not-a-real-token");
     expect(res.status).toBe(401);
   });
 
@@ -65,7 +71,7 @@ describe("requireAuth", () => {
 
     const res = await request(buildApp())
       .get("/protected")
-      .set("Authorization", `Bearer ${tokenFor(1, 4)}`);
+      .set("Cookie", `session=${tokenFor(1, 4)}`);
 
     expect(res.status).toBe(401);
   });
@@ -75,7 +81,7 @@ describe("requireAuth", () => {
 
     const res = await request(buildApp())
       .get("/protected")
-      .set("Authorization", `Bearer ${tokenFor(1, 0)}`);
+      .set("Cookie", `session=${tokenFor(1, 0)}`);
 
     expect(res.status).toBe(401);
   });
@@ -87,7 +93,7 @@ describe("requireAdmin", () => {
 
     const res = await request(buildApp())
       .get("/admin-only")
-      .set("Authorization", `Bearer ${tokenFor(1, 0)}`);
+      .set("Cookie", `session=${tokenFor(1, 0)}`);
 
     expect(res.status).toBe(200);
   });
@@ -97,7 +103,7 @@ describe("requireAdmin", () => {
 
     const res = await request(buildApp())
       .get("/admin-only")
-      .set("Authorization", `Bearer ${tokenFor(1, 0)}`);
+      .set("Cookie", `session=${tokenFor(1, 0)}`);
 
     expect(res.status).toBe(403);
   });

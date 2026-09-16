@@ -30,7 +30,7 @@ describe("auth and access control against a real database", () => {
   // tokenVersion revocation, end to end: the unit suite mocks the user
   // lookup that reads the version, so only a real round-trip proves the
   // column is actually written and compared.
-  test("invalidates existing tokens when the password changes", async () => {
+  test("invalidates existing sessions when the password changes", async () => {
     const alice = await signUp({ password: "original-password" });
 
     const before = await request(app).get("/api/users/me").set(alice.auth);
@@ -42,16 +42,41 @@ describe("auth and access control against a real database", () => {
       .send({ currentPassword: "original-password", newPassword: "a-brand-new-password" });
     expect(changed.status).toBe(200);
 
-    // The old token is now worthless...
+    // The cookie the session started with is now worthless...
     const after = await request(app).get("/api/users/me").set(alice.auth);
     expect(after.status).toBe(401);
 
-    // ...but the fresh one handed back by the change survives.
-    const renewed = { Authorization: `Bearer ${changed.body.token}` };
-    expect((await request(app).get("/api/users/me").set(renewed)).status).toBe(200);
+    // ...but the refreshed cookie the change set on its response survives,
+    // so the person who made the change isn't signed out of their own
+    // browser. A real browser swaps it automatically; supertest has no
+    // cookie jar, so the new one is read off the response by hand.
+    const renewedCookie = (changed.headers["set-cookie"] || [])
+      .find((c) => c.startsWith("session="))
+      .split(";")[0];
+    expect(renewedCookie).not.toBe(alice.cookie);
+    expect((await request(app).get("/api/users/me").set({ Cookie: renewedCookie })).status).toBe(200);
 
     const stored = await prisma.user.findUnique({ where: { id: alice.id } });
     expect(stored.tokenVersion).toBe(1);
+  });
+
+  // Logging out has to be a server round-trip now, because an HttpOnly
+  // cookie can't be cleared from JavaScript. Verify it actually ends the
+  // session rather than just looking like it does client-side.
+  test("logging out clears the session cookie and ends the session", async () => {
+    const alice = await signUp();
+
+    expect((await request(app).get("/api/users/me").set(alice.auth)).status).toBe(200);
+
+    const out = await request(app).post("/api/auth/logout").set(alice.auth);
+    expect(out.status).toBe(200);
+
+    const cleared = (out.headers["set-cookie"] || []).find((c) => c.startsWith("session="));
+    expect(cleared).toMatch(/session=;/);
+
+    // The browser would now hold no session cookie at all, which is the
+    // same position as never having signed in.
+    expect((await request(app).get("/api/users/me")).status).toBe(401);
   });
 
   // BOLA regression with real rows: Mallory is a genuine registered user

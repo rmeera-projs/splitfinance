@@ -18,7 +18,7 @@ function tokenFor(userId, tokenVersion = 0) {
 }
 
 const USER_ID = 1;
-const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
+const AUTH = { Cookie: `session=${tokenFor(USER_ID)}` };
 
 beforeEach(() => {
   jest.clearAllMocks();

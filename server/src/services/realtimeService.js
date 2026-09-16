@@ -1,4 +1,6 @@
 const jwt = require("jsonwebtoken");
+const { parse: parseCookies } = require("cookie");
+const { COOKIE_NAME } = require("../utils/authCookie");
 const prisma = require("../config/prisma");
 
 // Set once by initRealtime() when the app actually boots a real HTTP server
@@ -14,7 +16,10 @@ let io = null;
 function initRealtime(httpServer) {
   const { Server } = require("socket.io");
   io = new Server(httpServer, {
-    cors: { origin: process.env.CLIENT_URL || "*" },
+    // credentials: true so the browser attaches the session cookie to the
+    // handshake; as with the REST CORS config in app.js, that rules out a
+    // wildcard origin.
+    cors: { origin: process.env.CLIENT_URL || "http://localhost:5173", credentials: true },
   });
 
   // Auth middleware runs during the handshake, before the client ever sees
@@ -27,7 +32,11 @@ function initRealtime(httpServer) {
   // though the same stale token is correctly rejected by the REST API.
   io.use(async (socket, next) => {
     try {
-      const payload = jwt.verify(socket.handshake.auth?.token, process.env.JWT_SECRET);
+      // The token arrives as the HttpOnly session cookie on the handshake
+      // request, not in socket.handshake.auth - the client can no longer
+      // read it to pass explicitly, and the browser sends it for us.
+      const cookies = parseCookies(socket.handshake.headers.cookie || "");
+      const payload = jwt.verify(cookies[COOKIE_NAME], process.env.JWT_SECRET);
 
       const user = await prisma.user.findUnique({ where: { id: payload.userId }, select: { tokenVersion: true } });
       if (!user || user.tokenVersion !== payload.tokenVersion) {

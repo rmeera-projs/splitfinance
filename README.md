@@ -55,8 +55,9 @@ Everything below is the detail — [Features](#-features) first, then the
 
 ## ✨ Features
 
-- **Auth** — JWT-based signup/login with hashed passwords; every account has
-  a unique username (letters, numbers, underscores) alongside its email
+- **Auth** — signup/login with hashed passwords and a JWT session held in an
+  HttpOnly cookie (never readable by page JavaScript); every account has a
+  unique username (letters, numbers, underscores) alongside its email
 - **Account Management** — a dedicated Account page (linked from the main
   menu on every page) for updating your name, username, or email, and for
   changing your password (requires the current one)
@@ -279,6 +280,20 @@ review once the app was live on a real domain:
   a third party), runs in the wrong direction, or names the requester as
   both parties. Partial settlements (paying off less than the full
   balance) are intentionally still allowed.
+- **The session token is unreachable from JavaScript** - it lives in an
+  HttpOnly, SameSite=Lax cookie ([`authCookie.js`](server/src/utils/authCookie.js))
+  rather than `localStorage`, so a script injected into the page can't read
+  it and replay it elsewhere. Worth being precise about the limit: an
+  injected script can still make authenticated requests from the victim's
+  own browser, because the cookie rides along automatically. This narrows
+  the blast radius from "token stolen and reusable anywhere for 7 days" to
+  "abuse confined to the live page" - which is why the CSP below is doing
+  comparable work on the same threat. Two consequences worth knowing: CSRF
+  is handled by `SameSite` (the frontend and API are different origins but
+  the same *site*, so the cookie is sent on the app's own calls and withheld
+  from cross-site ones), and signing out became a real endpoint
+  (`POST /api/auth/logout`), since JavaScript cannot delete a cookie it
+  cannot see.
 - **Sessions can actually be revoked** - JWTs carry a `tokenVersion` claim
   (`User.tokenVersion` in the schema) checked against the user's current
   value on every authenticated request, in both `requireAuth`
@@ -287,9 +302,9 @@ review once the app was live on a real domain:
   Changing or resetting a password increments it, which invalidates every
   token issued before that point - including one that leaked, which may be
   exactly why someone's resetting their password - rather than leaving it
-  valid for the rest of its 7-day life. `changePassword` re-issues a fresh
-  token in its response so the requester's own session survives; anyone
-  else holding an older token doesn't.
+  valid for the rest of its 7-day life. `changePassword` sets a fresh
+  session cookie on its response so the requester's own session survives;
+  anyone else holding an older token doesn't.
 - **Rate limiting, tuned per endpoint kind**
   ([`rateLimit.js`](server/src/middleware/rateLimit.js)): `signup`/`login`/
   `forgot-password` are capped at 10 requests/15min/IP (guards against
@@ -350,7 +365,7 @@ splitfinance/
 ```
 
 ### API Surface
-21 REST endpoints across 7 resources (auth, users, groups, expenses,
+22 REST endpoints across 7 resources (auth, users, groups, expenses,
 settlements, insights, admin) - see `server/src/routes/`.
 
 ### Tech Stack
@@ -507,21 +522,21 @@ through this workflow at all.
 
 ## 🧪 Testing
 
-301 tests across three layers, deliberately rather than incidentally: a
+314 tests across three layers, deliberately rather than incidentally: a
 fast mocked layer for logic, a real-database layer for everything mocks
 structurally can't prove, and a browser layer for the flows a user actually
 performs.
 
 | Layer | Count | What's real | What's mocked |
 |---|---|---|---|
-| Unit | 277 (170 backend, 107 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
-| Integration | 16 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
-| End-to-end | 8 | everything — real browser, real API, real database | nothing |
+| Unit | 287 (173 backend, 114 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
+| Integration | 17 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
+| End-to-end | 10 | everything — real browser, real API, real database | nothing |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 170 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 107 (Vitest + React Testing Library)
+cd server && npm test        # 173 (Jest + Supertest, Prisma mocked)
+cd client && npm test        # 114 (Vitest + React Testing Library)
 ```
 
 **Integration** (`server/tests/integration/`) runs the real app against a
@@ -548,7 +563,7 @@ touches local development data.
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p splitfinance-e2e up -d --build
 cd e2e && npm install && npx playwright install chromium
-npm test                     # 8 flows
+npm test                     # 10 flows
 npm run screenshots          # regenerates the README images from the live app
 ```
 
@@ -650,6 +665,12 @@ correction afterwards that may or may not land.
 - [ ] Duplicate-expense detection - flag a newly-added expense that looks
   like an accidental double-entry of a recent one (similar description,
   amount, and date)
+- [x] Move the session off `localStorage` into an HttpOnly cookie - the JWT
+  was readable by any script on the page and replayable for its full 7-day
+  life; it's now an HttpOnly, SameSite=Lax cookie the app can't see. Brought
+  a logout endpoint with it (JavaScript can't delete a cookie it can't read)
+  and a server-side session probe on load, since the client can no longer
+  tell on its own whether it's signed in
 - [ ] Automatic rollback for database migrations - migrations are currently
   forward-only, so undoing one means writing a new migration by hand. The
   integer-cents conversion made the gap concrete: reverting the application

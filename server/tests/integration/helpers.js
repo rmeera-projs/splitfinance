@@ -18,11 +18,21 @@ async function signUp(overrides = {}) {
     throw new Error(`signUp failed (${res.status}): ${JSON.stringify(res.body)}`);
   }
 
+  // The session arrives as a Set-Cookie header rather than a token in the
+  // body - supertest has no cookie jar, so the header is carried forward
+  // manually as `auth` and passed to .set() on subsequent requests, exactly
+  // as a browser would send it back.
+  const setCookie = (res.headers["set-cookie"] || []).find((c) => c.startsWith("session="));
+  if (!setCookie) {
+    throw new Error("signUp succeeded but no session cookie was set");
+  }
+  const cookie = setCookie.split(";")[0];
+
   return {
     ...body,
     id: res.body.user.id,
-    token: res.body.token,
-    auth: { Authorization: `Bearer ${res.body.token}` },
+    cookie,
+    auth: { Cookie: cookie },
   };
 }
 

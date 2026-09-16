@@ -60,9 +60,13 @@ describe("realtime socket server", () => {
     httpServer.close(done);
   });
 
+  // The server reads the session from the handshake's Cookie header now,
+  // not socket.auth - the browser attaches an HttpOnly cookie there
+  // automatically, and no client code can read it to pass explicitly. The
+  // node client has no cookie jar, so tests set the header directly.
   function connect(token) {
     const socket = ioClient(`http://localhost:${port}`, {
-      auth: { token },
+      extraHeaders: { Cookie: `session=${token}` },
       reconnection: false,
       forceNew: true,
       transports: ["websocket"],

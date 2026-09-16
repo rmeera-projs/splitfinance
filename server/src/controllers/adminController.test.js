@@ -18,8 +18,8 @@ function tokenFor(userId, tokenVersion = 0) {
 }
 
 const ADMIN_ID = 1;
-const ADMIN_AUTH = { Authorization: `Bearer ${tokenFor(ADMIN_ID)}` };
-const NON_ADMIN_AUTH = { Authorization: `Bearer ${tokenFor(2)}` };
+const ADMIN_AUTH = { Cookie: `session=${tokenFor(ADMIN_ID)}` };
+const NON_ADMIN_AUTH = { Cookie: `session=${tokenFor(2)}` };
 
 beforeEach(() => {
   jest.clearAllMocks();

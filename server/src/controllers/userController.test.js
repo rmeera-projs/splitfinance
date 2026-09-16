@@ -18,7 +18,7 @@ function tokenFor(userId, tokenVersion = 0) {
 }
 
 const USER_ID = 1;
-const AUTH = { Authorization: `Bearer ${tokenFor(USER_ID)}` };
+const AUTH = { Cookie: `session=${tokenFor(USER_ID)}` };
 const PUBLIC_USER = {
   id: USER_ID,
   name: "Alice",
@@ -140,10 +140,14 @@ describe("PATCH /api/users/me/password", () => {
     // just "some string was passed" - catches a swapped-argument bug.
     const newHash = prisma.user.update.mock.calls[0][0].data.passwordHash;
     expect(await bcrypt.compare("newpassword123", newHash)).toBe(true);
-    // A fresh token is issued (carrying the bumped tokenVersion) so the
-    // requester's own session survives - see AuthContext.jsx's
-    // changePassword, which stores this over the now-stale one.
-    expect(jwt.verify(res.body.token, process.env.JWT_SECRET)).toMatchObject({ userId: USER_ID, tokenVersion: 1 });
+    // A fresh session cookie is set (carrying the bumped tokenVersion) so
+    // the requester's own session survives the invalidation their password
+    // change just caused. The browser swaps the cookie itself - nothing is
+    // returned in the body for the client to store.
+    expect(res.body.token).toBeUndefined();
+    const raw = (res.headers["set-cookie"] || []).find((c) => c.startsWith("session="));
+    const token = decodeURIComponent(raw.split(";")[0].split("=")[1]);
+    expect(jwt.verify(token, process.env.JWT_SECRET)).toMatchObject({ userId: USER_ID, tokenVersion: 1 });
   });
 
   test("rejects an incorrect current password", async () => {

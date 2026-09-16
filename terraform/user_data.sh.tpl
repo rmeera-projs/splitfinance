@@ -159,6 +159,12 @@ services:
       POSTGRES_PASSWORD: "$POSTGRES_PASSWORD_VALUE"
   server:
     environment:
+      # Two things read this and silently do the wrong thing without it:
+      # the session cookie only gets its Secure flag in production (see
+      # server/src/utils/authCookie.js), and emailService only withholds the
+      # raw password-reset URL from the logs in production. Both guards were
+      # written against NODE_ENV and were inert here until it was set.
+      NODE_ENV: "production"
       CLIENT_URL: "https://${domain_name}"
       JWT_SECRET: "$JWT_SECRET_VALUE"
       DATABASE_URL: "postgresql://postgres:$POSTGRES_PASSWORD_VALUE@db:5432/splitfinance?schema=public"

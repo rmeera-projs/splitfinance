@@ -112,6 +112,66 @@ test("splits an amount that doesn't divide evenly, down to the cent", async ({ p
   await expect(page.getByText(/\$0\.02/).first()).toBeVisible();
 });
 
+// The point of the whole cookie migration: the session must be genuinely
+// unreachable from page JavaScript, which is something only a real browser
+// can demonstrate. An HttpOnly cookie is absent from document.cookie while
+// still being sent on every request.
+test("keeps the session out of reach of page JavaScript", async ({ page }) => {
+  await signUp(page);
+
+  const exposed = await page.evaluate(() => ({
+    documentCookie: document.cookie,
+    localStorage: JSON.stringify(window.localStorage),
+    sessionStorage: JSON.stringify(window.sessionStorage),
+  }));
+
+  expect(exposed.documentCookie).not.toContain("session");
+  expect(exposed.localStorage).not.toContain("token");
+  expect(exposed.sessionStorage).not.toContain("token");
+
+  // ...and yet the session is real: the browser is holding an HttpOnly
+  // cookie and sending it, which is why this authenticated page loads.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: /^Hi, / })).toBeVisible();
+
+  const cookies = await page.context().cookies();
+  const session = cookies.find((c) => c.name === "session");
+  expect(session).toBeDefined();
+  expect(session.httpOnly).toBe(true);
+  expect(session.sameSite).toBe("Lax");
+});
+
+// The WebSocket authenticates from the handshake's Cookie header now rather
+// than a token passed explicitly, and a broken handshake fails silently -
+// the page still works, it just never receives live updates. So this drives
+// two real browsers and checks one actually sees the other's change.
+test("delivers a live update to another member over the socket", async ({ page, browser }) => {
+  const other = uniqueUser("watcher");
+  const otherContext = await browser.newContext();
+  const otherPage = await otherContext.newPage();
+  await signUp(otherPage, other);
+
+  await signUp(page);
+  await createGroup(page, "Live Updates", [other.username]);
+  const groupUrl = page.url();
+
+  // The second member opens the same group and just watches.
+  await otherPage.goto(groupUrl);
+  await expect(otherPage.getByRole("heading", { name: "Live Updates" })).toBeVisible();
+
+  await page.getByPlaceholder("Description").first().fill("Concert tickets");
+  await page.getByPlaceholder("Amount").first().fill("120");
+  await page.getByRole("button", { name: "Add expense" }).click();
+  await expect(page.getByText("Concert tickets")).toBeVisible();
+
+  // No reload here - this only appears if the socket handshake authenticated
+  // and the activity reached the other browser.
+  await expect(otherPage.getByText(/added an expense/i)).toBeVisible({ timeout: 10000 });
+  await expect(otherPage.getByText("Concert tickets")).toBeVisible();
+
+  await otherContext.close();
+});
+
 test("a signed-out visitor is redirected to login", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login/);

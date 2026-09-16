@@ -12,10 +12,12 @@ let socket = null;
 // need it, rather than holding an open connection on every page.
 export function getSocket() {
   if (!socket) {
-    socket = io(SOCKET_URL, { autoConnect: false });
+    // withCredentials makes the browser send the HttpOnly session cookie on
+    // the handshake request, which is where the server authenticates the
+    // connection (see realtimeService's io.use). This used to pass the token
+    // explicitly via socket.auth, read out of localStorage - impossible now,
+    // and unnecessary, since the browser attaches the cookie itself.
+    socket = io(SOCKET_URL, { autoConnect: false, withCredentials: true });
   }
-  // The auth token can change (login/logout) between uses of the shared
-  // socket, so refresh it on every access rather than only at creation.
-  socket.auth = { token: localStorage.getItem("token") };
   return socket;
 }
