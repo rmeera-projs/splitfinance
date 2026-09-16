@@ -144,7 +144,9 @@ manual tagging. This is implemented in
   — no live API calls happen in the test suite
 
 If `COHERE_API_KEY` isn't set, every expense is simply categorized as `"Other"`
-— the app works fully without it.
+— the app works fully without it. The same is true for an account that hasn't
+confirmed its email address yet: categorization is skipped rather than the
+expense being refused (see Security).
 
 ### Natural-Language Expense Entry
 
@@ -173,6 +175,11 @@ turns into structured fields:
   "optional until you need it" spirit as auto-categorization
 - Fully unit-tested with a mocked Cohere client
   (`expenseParsingService.test.js`)
+- **Requires a confirmed email address** - this is the one endpoint whose
+  entire purpose is the AI call, so it's also the only one that refuses
+  outright (with a `code: "EMAIL_NOT_VERIFIED"` the client keys its
+  "resend confirmation" prompt off). Adding an expense by hand is
+  unaffected. See Security
 
 ## 📊 Spending Insights
 
@@ -352,6 +359,45 @@ review once the app was live on a real domain:
   raw reset link (which embeds the live token) when
   `NODE_ENV !== "production"`; the database itself only ever stores the
   token's SHA-256 hash, never the raw value.
+- **Security events are logged structurally, and escalate on their own** -
+  [`securityLog.js`](server/src/services/securityLog.js) writes one JSON
+  object per line for failed and successful logins, signups, password
+  resets, rejected session cookies, every 403, every 500, AI usage, and any
+  rate limiter tripping. The part that makes it more than a firehose is
+  that repeated events escalate to a `warn` on stderr: one failed login is
+  a typo, five against the same account inside fifteen minutes is worth
+  looking at. Failed logins are keyed by the *account* rather than the
+  source address, because a distributed credential-stuffing run varies
+  where it comes from but not what it is trying to get into; bulk signups
+  are keyed the other way. Where a rate limiter already exists, the warning
+  fires deliberately below it - by the time a limiter trips, the request
+  that was the useful signal has already been discarded. Field names that
+  look like credentials are redacted no matter what a caller passes.
+- **The AI features require a confirmed email address** - signing up is
+  free and instant, which makes throwaway accounts the cheapest route to
+  this project's metered Cohere quota. `POST /api/expenses/parse` is gated
+  on `users.email_verified_at`
+  ([`requireVerifiedEmail.js`](server/src/middleware/requireVerifiedEmail.js)),
+  and creating or editing an expense still works but skips its
+  auto-categorization. The scope is deliberate: an unconfirmed account can
+  create groups, add expenses, split them and settle up - everything people
+  actually sign up to do - because none of that costs anything, and putting
+  a mail round-trip in front of the first run would be a real cost against
+  a problem that does not exist there. The confirmation token is 32 random
+  bytes stored only as a SHA-256 hash, single-use, and asking for a fresh
+  link spends the outstanding one.
+- **Dependencies are audited on a schedule, not just when someone
+  remembers** - [`security.yml`](.github/workflows/security.yml) runs
+  `npm audit` on every change *and* weekly, since "no new commits" is not
+  the same as "no new advisories". It fails on production dependencies at
+  moderate or worse and reports dev-tooling findings without blocking - a
+  split the last real findings argue for, since the one that shipped to
+  browsers (an open redirect in react-router) was rated *moderate* while
+  several criticals were in build-time-only tooling. Dependabot
+  ([`dependabot.yml`](.github/dependabot.yml)) opens the upgrade PRs, which
+  run the full test suite before anyone merges them, and the Dockerfiles
+  use `npm ci` so the tree running in production is the tree that was
+  audited.
 
 ## 🏗️ Architecture
 
@@ -365,7 +411,7 @@ splitfinance/
 ```
 
 ### API Surface
-22 REST endpoints across 7 resources (auth, users, groups, expenses,
+24 REST endpoints across 7 resources (auth, users, groups, expenses,
 settlements, insights, admin) - see `server/src/routes/`.
 
 ### Tech Stack
@@ -508,10 +554,11 @@ A few things the AWS setup adds beyond the bare instance:
   deliberate extra step rather than an accidental `terraform apply`.
 
 ### CI/CD
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend and
-frontend tests (plus a frontend build) on every push/PR to `main`. On a push
-to `main`, once both test jobs pass, it also redeploys the AWS EC2 instance
-automatically - via AWS Systems Manager, not SSH, since the instance's
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on
+every push/PR to `main` - backend lint and unit tests, the Postgres-backed
+integration suite, frontend lint/tests/build, and the Playwright end-to-end
+suite against a full Docker Compose stack. On a push to `main`, once all
+four pass, it also redeploys the AWS EC2 instance automatically - via AWS Systems Manager, not SSH, since the instance's
 security group intentionally only allows SSH from one trusted IP that a
 GitHub-hosted runner could never match. Authenticates to AWS via GitHub
 OIDC ([`terraform/github_oidc.tf`](terraform/github_oidc.tf)) rather than a
@@ -520,23 +567,72 @@ stored access-key secret - see
 for details. Railway's own auto-deploy-on-push (see above) doesn't go
 through this workflow at all.
 
+### Database migrations, and getting back out of one
+
+Migrations used to be forward-only: `prisma migrate deploy` ran as the
+container command and that was the whole story. Two schema migrations
+shipped in a single day made the gap concrete — reverting the application
+code after the integer-cents conversion would have left the database in
+cents while the old code expected dollars, showing every amount 100x too
+large.
+
+**Every migration ships with a `down.sql`**, including the nine that
+predate the convention. There's no allowlist of grandfathered ones: an
+exception list is the thing that grows, and "most migrations can be rolled
+back" isn't a property anyone can lean on at the moment they need it. Each
+one states plainly whether reversing it loses data, because that's what
+decides between reversing the schema and restoring a dump — and it gets
+read under time pressure. Two test layers enforce this: a filesystem check
+in the fast suite, and a database-backed test that applies the whole
+history forward and then reverses all of it. A `down.sql` that has never
+been executed is worse than not having one, because it gets trusted exactly
+when there's no time to check it.
+
+**Failed migrations roll back automatically.**
+[`migrate-and-start.sh`](server/scripts/migrate-and-start.sh) is now the
+container command: it dumps the database, migrates, and restores if the
+migration fails — then exits non-zero, so the server never starts against a
+schema the code doesn't expect. Postgres already rolls back a failed
+migration file on its own, so the real value is elsewhere: a failed
+`migrate deploy` leaves an unfinished row in `_prisma_migrations` that
+blocks *every subsequent deploy* with `P3018` until someone runs
+`migrate resolve` by hand. Restoring the dump clears that too. Dumps are
+only taken when something is actually pending, so ordinary restarts stay
+fast.
+
+**A migration that succeeded and was wrong is a separate, manual
+decision.** By then the app has been writing to the new schema, so whether
+to discard those writes isn't something a script should decide:
+
+```bash
+docker compose exec server ./scripts/rollback-migration.sh --list
+docker compose exec server ./scripts/rollback-migration.sh --down     # reverse the schema, keep the writes
+docker compose exec server ./scripts/rollback-migration.sh --restore   # replay a dump, lose the writes
+```
+
+In production the dumps live on the persistent EBS volume alongside the
+database itself. As an ordinary Docker volume they'd sit on the root disk,
+which is destroyed whenever the instance is replaced — while the database
+survives. The backups would have been the one thing unable to outlive an
+incident.
+
 ## 🧪 Testing
 
-314 tests across three layers, deliberately rather than incidentally: a
+404 tests across three layers, deliberately rather than incidentally: a
 fast mocked layer for logic, a real-database layer for everything mocks
 structurally can't prove, and a browser layer for the flows a user actually
 performs.
 
 | Layer | Count | What's real | What's mocked |
 |---|---|---|---|
-| Unit | 287 (173 backend, 114 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
-| Integration | 17 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
-| End-to-end | 10 | everything — real browser, real API, real database | nothing |
+| Unit | 349 (222 backend, 127 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
+| Integration | 44 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
+| End-to-end | 11 | everything — real browser, real API, real database | nothing |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 173 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 114 (Vitest + React Testing Library)
+cd server && npm test        # 222 (Jest + Supertest, Prisma mocked)
+cd client && npm test        # 127 (Vitest + React Testing Library)
 ```
 
 **Integration** (`server/tests/integration/`) runs the real app against a
@@ -544,7 +640,10 @@ real PostgreSQL, with nothing about the data layer mocked. That's what
 catches the class of bug the unit suite can't see by construction: wrong
 Prisma query shapes, migrations drifting from the schema the code expects,
 integer-cent storage and arithmetic, cascade deletes, unique constraints, and
-balance arithmetic that only means anything against persisted rows.
+balance arithmetic that only means anything against persisted rows. It also
+applies the entire migration history forward and then reverses all of it
+against a scratch database, which is the only thing that makes the down
+migrations trustworthy (see Database migrations, below).
 
 ```bash
 docker compose up -d db
@@ -563,13 +662,13 @@ touches local development data.
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p splitfinance-e2e up -d --build
 cd e2e && npm install && npx playwright install chromium
-npm test                     # 10 flows
+npm test                     # 11 flows
 npm run screenshots          # regenerates the README images from the live app
 ```
 
 ## 📁 Data Model
 
-7 tables:
+8 tables:
 
 ```
 users                  (id, name, username, email, password_hash, token_version, is_admin, created_at)
@@ -579,9 +678,13 @@ expenses               (id, group_id, paid_by, amount¹, description, category, 
 expense_splits         (id, expense_id, user_id, amount_owed¹)
 settlements            (id, group_id, from_user, to_user, amount¹, date, created_at)
 password_reset_tokens  (id, user_id, token_hash, expires_at, used_at, created_at)
+email_verification_tokens (id, user_id, token_hash, expires_at, used_at, created_at)
 ```
 
 ¹ `INTEGER`, holding **cents** rather than dollars — see Money below.
+
+`users.email_verified_at` is `NULL` until the address is confirmed. It gates
+the Cohere-backed features only — see Security.
 
 See `server/prisma/schema.prisma` for the full schema.
 
@@ -671,13 +774,28 @@ correction afterwards that may or may not land.
   a logout endpoint with it (JavaScript can't delete a cookie it can't read)
   and a server-side session probe on load, since the client can no longer
   tell on its own whether it's signed in
-- [ ] Automatic rollback for database migrations - migrations are currently
-  forward-only, so undoing one means writing a new migration by hand. The
-  integer-cents conversion made the gap concrete: reverting the application
-  code after that deploy would have left the database in cents while the
-  old code expected dollars, showing every amount 100x too large. Wants a
-  paired down-migration (and/or an automatic pre-migration dump) so a bad
-  deploy has a real escape hatch
+- [x] Automatic rollback for database migrations - every migration now
+  ships with a `down.sql`, the container entrypoint dumps the database
+  before migrating and restores automatically if the migration fails, and
+  `rollback-migration.sh` handles the harder case of a migration that
+  succeeded and was wrong. See "Database migrations" above
+- [x] Email verification - the AI features are gated on a confirmed
+  address, since signing up is free and instant and throwaway accounts were
+  the cheapest route to this project's metered Cohere quota. Everything
+  else stays open to an unconfirmed account
+- [x] Dependency scanning - `npm audit` on every change and weekly on a
+  schedule, plus Dependabot upgrade PRs that run the full test suite
+- [x] Security event logging - structured JSON events that escalate to a
+  warning when the same thing keeps happening from the same source
+- [ ] CAPTCHA on signup/login after repeated attempts - deliberately not
+  built yet: it needs a third-party provider and keys, and shipping an
+  inert code path waiting for them is worse than not having it. The per-IP
+  rate limits, the bulk-signup warnings, and email verification cover the
+  same ground for now
+- [ ] Ship the security logs somewhere - they're structured JSON precisely
+  so that "every failed login for this address in the last hour" is a query
+  rather than a parser someone has to write, but right now reading them
+  still means `docker compose logs` on the instance
 - [ ] Recurring expenses (rent, subscriptions)
 - [ ] Email notifications on new expenses
 - [x] Password reset flow
