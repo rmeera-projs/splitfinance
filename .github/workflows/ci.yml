@@ -171,7 +171,7 @@ jobs:
 
       # Traces/screenshots/video for whatever failed - the whole point of
       # capturing them is being able to see a CI-only failure afterwards.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
