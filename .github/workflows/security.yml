@@ -1,0 +1,70 @@
+name: Security
+
+# Deliberately a separate workflow from ci.yml rather than another job in
+# it. A vulnerability advisory gets published on someone else's schedule,
+# not on this repo's - folding it into the deploy gate would mean an
+# advisory landing overnight blocks an unrelated fix from shipping the next
+# morning. So this reports independently, and runs weekly as well as on
+# changes, since "no new commits" is not the same as "still no known
+# vulnerabilities".
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Monday mornings, UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: npm audit (${{ matrix.project }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Don't let one project's advisory hide another's - all three should
+      # report in the same run.
+      fail-fast: false
+      matrix:
+        project: [server, client, e2e]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+
+      # npm audit reads the lockfile, so there's no need to actually install
+      # anything - this is much faster than `npm ci` and just as accurate.
+
+      # The gate. --omit=dev is the important part: these are the packages
+      # that actually run in production and are reachable by a request, so a
+      # moderate finding here is worth stopping for. The threshold is
+      # deliberately lower than the usual `high` - the last real finding in
+      # this repo was a *moderate* open redirect in react-router, which
+      # ships to every visitor's browser, while several criticals were in
+      # build-time-only tooling.
+      - name: Audit production dependencies
+        working-directory: ${{ matrix.project }}
+        run: npm audit --omit=dev --audit-level=moderate
+
+      # Everything else - test runners, bundlers, linters. Worth seeing, but
+      # a vulnerability in a package that only ever runs on a developer's
+      # machine or a CI runner isn't a reason to fail the build, so this
+      # reports without blocking.
+      - name: Audit all dependencies (informational)
+        working-directory: ${{ matrix.project }}
+        continue-on-error: true
+        run: npm audit
+
+      # Supply-chain check rather than a vulnerability one: confirms each
+      # installed package matches what the registry actually signed, which
+      # is what would catch a tampered-with or republished tarball that no
+      # advisory exists for yet.
+      - name: Verify registry signatures (informational)
+        working-directory: ${{ matrix.project }}
+        continue-on-error: true
+        run: npm audit signatures
