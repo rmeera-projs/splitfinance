@@ -5,7 +5,11 @@
 # whichever platform builds this image needs to supply --build-arg
 # VITE_API_URL=https://your-backend-url/api (Railway/Render call this a
 # "build-time" or "build" variable in their service settings).
-FROM node:20-alpine AS build
+# node:24-alpine, not 20: Node 20 reached end of life in April 2026, and
+# the frontend toolchain will not run on it either - vitest 5 declares
+# ^22.12 || ^24 || >=26 and jsdom 28 needs >=22.22. Keeping CI and the
+# images on the same major is what stops "passes locally, fails in CI".
+FROM node:24-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
@@ -22,7 +26,7 @@ ARG VITE_API_URL
 ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:24-alpine
 WORKDIR /app
 RUN npm install -g serve
 
