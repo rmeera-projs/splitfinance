@@ -1,4 +1,8 @@
-FROM node:20-alpine
+# node:24-alpine, not 20: Node 20 reached end of life in April 2026, and
+# the frontend toolchain will not run on it either - vitest 5 declares
+# ^22.12 || ^24 || >=26 and jsdom 28 needs >=22.22. Keeping CI and the
+# images on the same major is what stops "passes locally, fails in CI".
+FROM node:24-alpine
 
 # postgresql16-client matches the postgres:16-alpine server in
 # docker-compose.yml. pg_dump refuses to dump from a server newer than
