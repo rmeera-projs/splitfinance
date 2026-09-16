@@ -38,6 +38,13 @@ updates:
     open-pull-requests-limit: 3
     labels: [dependencies, backend]
     groups:
+      # prisma and @prisma/client must always be on the same version - the
+      # CLI generates the client the app imports. Dependabot opened them as
+      # two separate major PRs, each of which fails the build on its own,
+      # which is not a reviewable state. Grouped by name so they can only
+      # ever move together, majors included.
+      prisma:
+        patterns: ["prisma", "@prisma/client"]
       server-minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
@@ -56,6 +63,14 @@ updates:
       # eslint 10 drops eslintrc support. Migrating to flat config is a
       # deliberate task covering both server and client together.
       - dependency-name: eslint
+        update-types: [version-update:semver-major]
+      # Prisma 7 is a long way from the 5.x this app is on, and fails every
+      # backend job. Upgrading means reviewing the client API changes and
+      # re-running the migration tooling against a scratch database, which
+      # is a task rather than a bump.
+      - dependency-name: prisma
+        update-types: [version-update:semver-major]
+      - dependency-name: "@prisma/client"
         update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
