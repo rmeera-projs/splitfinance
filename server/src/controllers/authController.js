@@ -6,6 +6,13 @@ const { ApiError } = require("../middleware/errorHandler");
 const { sendPasswordResetEmail } = require("../services/emailService");
 const { USERNAME_RE } = require("../utils/validators");
 const { setAuthCookie, clearAuthCookie } = require("../utils/authCookie");
+const {
+  logLoginFailed,
+  logLoginSucceeded,
+  logSignup,
+  logPasswordResetRequested,
+  logPasswordResetCompleted,
+} = require("../services/securityLog");
 
 const SALT_ROUNDS = 10;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -56,6 +63,7 @@ async function signup(req, res, next) {
       data: { name, username, email, passwordHash },
     });
 
+    logSignup(user.id, user.email, req.ip);
     setAuthCookie(res, user);
     res.status(201).json({
       user: { id: user.id, name: user.name, username: user.username, email: user.email, isAdmin: user.isAdmin },
@@ -70,11 +78,21 @@ async function login(req, res, next) {
     const { email, password } = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) throw new ApiError(401, "Invalid email or password");
+    // The response is identical either way - the reason is recorded only
+    // in the log, never sent back, since telling a caller which half
+    // failed is the account enumeration this endpoint avoids.
+    if (!user) {
+      logLoginFailed(email, req.ip, "no such account");
+      throw new ApiError(401, "Invalid email or password");
+    }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) throw new ApiError(401, "Invalid email or password");
+    if (!valid) {
+      logLoginFailed(email, req.ip, "wrong password");
+      throw new ApiError(401, "Invalid email or password");
+    }
 
+    logLoginSucceeded(user.id, user.email, req.ip);
     setAuthCookie(res, user);
     res.json({
       user: { id: user.id, name: user.name, username: user.username, email: user.email, isAdmin: user.isAdmin },
@@ -93,6 +111,9 @@ async function forgotPassword(req, res, next) {
     const { email } = forgotPasswordSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
+    // Same shape as the login logging above: whether the address is
+    // registered is recorded, but the response stays identical regardless.
+    logPasswordResetRequested(email, req.ip, Boolean(user));
     if (user) {
       const rawToken = crypto.randomBytes(32).toString("hex");
       await prisma.passwordResetToken.create({
@@ -138,6 +159,11 @@ async function resetPassword(req, res, next) {
       // Single-use: mark it spent so the same link can't be replayed.
       prisma.passwordResetToken.update({ where: { id: resetToken.id }, data: { usedAt: new Date() } }),
     ]);
+
+    // A completed reset is worth recording on its own: it invalidates every
+    // existing session for the account, so if the owner did not do it, this
+    // is the line that says when it happened.
+    logPasswordResetCompleted(resetToken.userId, req.ip);
 
     res.json({ message: "Password updated - you can now log in with your new password." });
   } catch (err) {

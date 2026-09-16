@@ -1,7 +1,20 @@
 version: "3.9"
 
+# Docker's default json-file log driver has no size limit at all, so
+# container output grows until it fills the disk. That was survivable when
+# the server barely logged; it is not now that every security event is
+# written as a line (server/src/services/securityLog.js). 50MB per service
+# is plenty to investigate an incident from and far short of the instance
+# volume.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
+    logging: *default-logging
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -14,6 +27,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   server:
+    logging: *default-logging
     build: ./server
     restart: unless-stopped
     depends_on:
@@ -30,6 +44,7 @@ services:
       - "5000:5000"
 
   client:
+    logging: *default-logging
     build: ./client
     restart: unless-stopped
     depends_on:

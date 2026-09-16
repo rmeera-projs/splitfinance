@@ -1,4 +1,17 @@
 const rateLimit = require("express-rate-limit");
+const { logRateLimitExceeded, logAiRequest } = require("../services/securityLog");
+
+// Replaces express-rate-limit's default "send the configured message"
+// handler with one that records the event first. A limiter tripping is the
+// clearest signal this app produces that something abnormal is happening,
+// and previously it was invisible - the caller got a 429 and nothing was
+// written down. Behaviour is otherwise unchanged: same status, same body.
+function limitHandler(limiterName) {
+  return (req, res, next, options) => {
+    logRateLimitExceeded(limiterName, req.ip, req.userId);
+    res.status(options.statusCode).json(options.message);
+  };
+}
 
 // Applied to signup/login/forgot-password - the three endpoints where an
 // attacker gains something from many rapid guesses (credential stuffing on
@@ -25,6 +38,7 @@ const authRateLimit = rateLimit({
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === "test",
   message: { error: "Too many attempts - please try again later." },
+  handler: limitHandler("auth"),
 });
 
 // Applied to every endpoint that calls out to Cohere (expense creation/
@@ -47,6 +61,7 @@ const aiRateLimitPerIp = rateLimit({
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === "test",
   message: { error: "Too many AI-powered requests from this network - please try again later." },
+  handler: limitHandler("ai-per-ip"),
 });
 
 const aiRateLimitPerUser = rateLimit({
@@ -59,6 +74,7 @@ const aiRateLimitPerUser = rateLimit({
   keyGenerator: (req) => String(req.userId),
   skip: () => process.env.NODE_ENV === "test",
   message: { error: "Too many AI-powered requests - please try again later." },
+  handler: limitHandler("ai-per-user"),
 });
 
 const aiRateLimitDaily = rateLimit({
@@ -69,8 +85,17 @@ const aiRateLimitDaily = rateLimit({
   keyGenerator: (req) => String(req.userId),
   skip: () => process.env.NODE_ENV === "test",
   message: { error: "Daily limit for AI-powered requests reached - please try again tomorrow." },
+  handler: limitHandler("ai-daily"),
 });
 
-const aiRateLimit = [aiRateLimitPerIp, aiRateLimitPerUser, aiRateLimitDaily];
+// Runs last, after all three limiters, so it only records requests that
+// actually reached Cohere - a 429 is already reported by limitHandler above
+// and counting it here too would double-count the same attempt.
+function logAiUsage(req, res, next) {
+  logAiRequest(req.userId, req.ip, req.originalUrl);
+  next();
+}
+
+const aiRateLimit = [aiRateLimitPerIp, aiRateLimitPerUser, aiRateLimitDaily, logAiUsage];
 
 module.exports = { authRateLimit, aiRateLimit };
