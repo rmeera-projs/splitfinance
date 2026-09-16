@@ -13,7 +13,7 @@
     "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {
-    "@prisma/client": "^5.19.0",
+    "@prisma/client": "^7.10.0",
     "bcrypt": "^6.0.0",
     "cohere-ai": "^8.1.0",
     "cookie": "^0.7.2",
