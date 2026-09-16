@@ -1,8 +1,31 @@
 # Keeps dependencies patched without anyone having to remember to run
-# `npm audit`. Dependabot opens a PR per outdated/vulnerable package, and
-# because PRs to main run the full CI workflow (lint, unit, integration,
-# Playwright), each upgrade arrives already proven against the real test
-# suite rather than needing a manual smoke test.
+# `npm audit`. Dependabot opens the upgrade PRs, and because PRs to main run
+# the full CI workflow (lint, unit, integration, Playwright), each upgrade
+# arrives already proven against the real test suite rather than needing a
+# manual smoke test.
+#
+# Tuned for a repo with one maintainer. The first run opened twelve PRs at
+# once, which is not a sustainable amount of mail for a project this size,
+# so:
+#
+#   - Routine minor/patch updates are grouped into ONE pull request per
+#     project. They are nearly always safe, and reviewing them together is
+#     both faster and no less careful than reviewing eight separately.
+#   - The schedule is monthly, not weekly.
+#   - Majors that were reviewed and deliberately declined are ignored, so
+#     they stop reappearing every time a new patch of them ships. That is
+#     what actually generates recurring noise: a closed PR does not come
+#     back, but 19.3.1 arriving the following week opens a fresh one.
+#
+# None of this weakens security cover, which is the thing the setup is
+# actually for. Dependabot *security* updates are a separate mechanism,
+# triggered by published advisories rather than by this schedule, and are
+# unaffected by grouping or open-pull-requests-limit. On top of that,
+# .github/workflows/security.yml runs `npm audit` on every change and
+# weekly, and fails on production dependencies at moderate or worse.
+#
+# To take an ignored major later, delete its entry here and Dependabot will
+# offer it again on the next run.
 version: 2
 
 updates:
@@ -11,40 +34,77 @@ updates:
   - package-ecosystem: npm
     directory: /server
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
     labels: [dependencies, backend]
     groups:
-      # Patch/minor bumps of dev tooling are noise one PR at a time, and
-      # they're the bulk of the volume - batched into a single weekly PR
-      # so the individually-reviewed ones stay visible.
-      dev-dependencies:
-        dependency-type: development
+      server-minor-and-patch:
+        patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # ESM-only from 2.x, which breaks the entire Jest suite. 0.7.x is
+      # pinned deliberately to match what cookie-parser depends on
+      # internally; revisit only alongside a decision about ESM for the
+      # backend as a whole.
+      - dependency-name: cookie
+        update-types: [version-update:semver-major]
+      # zod 4 renames ZodError.errors to .issues, which turns every
+      # validation 400 into a 500 via middleware/errorHandler.js. Worth
+      # doing, but as a code change rather than a version bump.
+      - dependency-name: zod
+        update-types: [version-update:semver-major]
+      # eslint 10 drops eslintrc support. Migrating to flat config is a
+      # deliberate task covering both server and client together.
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /client
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
     labels: [dependencies, frontend]
     groups:
-      dev-dependencies:
-        dependency-type: development
+      client-minor-and-patch:
+        patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # React 19 changes ref handling, removes propTypes, and alters the
+      # act() semantics @testing-library relies on - it fails the browser
+      # suite today. A migration, with the testing-library versions moved
+      # in step, not a bump.
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+      # Tailwind 4 is a rewrite: CSS-first configuration, a different
+      # PostCSS entry point, renamed utilities. Needs the styling checked
+      # visually and the README screenshots regenerated.
+      - dependency-name: tailwindcss
+        update-types: [version-update:semver-major]
+      # See the server entry above - both projects migrate together.
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /e2e
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 2
     labels: [dependencies, testing]
+    groups:
+      e2e-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
-  # The workflow files pin actions by major version (actions/checkout@v4 and
+  # The workflow files pin actions by major version (actions/checkout@v7 and
   # friends), which stops getting security fixes the moment a new major
   # lands - this is the only thing that notices.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     labels: [dependencies, ci]
+    groups:
+      github-actions:
+        patterns: ["*"]
