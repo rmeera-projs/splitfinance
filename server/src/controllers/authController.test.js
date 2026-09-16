@@ -53,7 +53,15 @@ describe("POST /api/auth/signup", () => {
     const res = await request(app).post("/api/auth/signup").send(validBody);
 
     expect(res.status).toBe(201);
-    expect(res.body.user).toEqual({ id: 1, name: "Alice", username: "alice1", email: "alice@example.com" });
+    expect(res.body.user).toEqual({
+      id: 1,
+      name: "Alice",
+      username: "alice1",
+      email: "alice@example.com",
+      // A brand-new account has not confirmed its address yet; the client
+      // uses this to decide whether to show the confirmation banner.
+      emailVerified: false,
+    });
 
     // The token must not come back in the body any more - a body the client
     // can read is a token the client can store, which is exactly what the
@@ -139,7 +147,15 @@ describe("POST /api/auth/login", () => {
       .send({ email: "alice@example.com", password: "password123" });
 
     expect(res.status).toBe(200);
-    expect(res.body.user).toEqual({ id: 1, name: "Alice", username: "alice1", email: "alice@example.com" });
+    expect(res.body.user).toEqual({
+      id: 1,
+      name: "Alice",
+      username: "alice1",
+      email: "alice@example.com",
+      // A brand-new account has not confirmed its address yet; the client
+      // uses this to decide whether to show the confirmation banner.
+      emailVerified: false,
+    });
     expect(res.body.token).toBeUndefined();
     // tokenVersion is embedded too (see middleware/auth.js) - not just userId.
     expect(jwt.verify(sessionCookie(res).token, process.env.JWT_SECRET)).toMatchObject({

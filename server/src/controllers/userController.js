@@ -2,7 +2,7 @@ const bcrypt = require("bcrypt");
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
-const { publicUserSelect } = require("../utils/publicUser");
+const { publicUserSelect, presentUser } = require("../utils/publicUser");
 const { USERNAME_RE } = require("../utils/validators");
 const { setAuthCookie } = require("../utils/authCookie");
 
@@ -28,7 +28,7 @@ async function getMe(req, res, next) {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.userId }, select: publicUserSelect });
     if (!user) throw new ApiError(404, "User not found");
-    res.json(user);
+    res.json(presentUser(user));
   } catch (err) {
     next(err);
   }
@@ -63,7 +63,7 @@ async function updateProfile(req, res, next) {
       data: updates,
       select: publicUserSelect,
     });
-    res.json(user);
+    res.json(presentUser(user));
   } catch (err) {
     next(err);
   }

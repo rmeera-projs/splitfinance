@@ -87,7 +87,16 @@ async function createExpense(req, res, next) {
     // Best-effort auto-categorization; categorizeExpense already falls back
     // to FALLBACK_CATEGORY internally, but guard here too so a surprise
     // throw can never block expense creation.
-    const category = await categorizeExpense(data.description).catch(() => FALLBACK_CATEGORY);
+    //
+    // Skipped entirely for an unverified account. Adding an expense is core
+    // functionality and stays open to everyone (which is why this route has
+    // no requireVerifiedEmail on it, unlike /parse) - but the Cohere call
+    // hidden inside it is the metered part, so that is what gets withheld.
+    // The expense is still created, just in the default category, which the
+    // user can set by hand.
+    const category = req.emailVerified
+      ? await categorizeExpense(data.description).catch(() => FALLBACK_CATEGORY)
+      : FALLBACK_CATEGORY;
 
     const expense = await prisma.expense.create({
       data: {
@@ -146,8 +155,10 @@ async function updateExpense(req, res, next) {
     // Only re-run categorization when the description actually changed -
     // avoids burning a Cohere call on every edit, and keeps a manually
     // corrected category from getting silently overwritten by unrelated edits.
+    // Unverified accounts keep whatever category is already set rather than
+    // re-running the Cohere call - same reasoning as createExpense above.
     const category =
-      data.description === existing.description
+      data.description === existing.description || !req.emailVerified
         ? existing.category
         : await categorizeExpense(data.description).catch(() => FALLBACK_CATEGORY);
 

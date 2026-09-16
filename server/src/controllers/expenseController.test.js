@@ -44,8 +44,10 @@ const AUTH = { Cookie: `session=${tokenFor(USER_ID)}` };
 beforeEach(() => {
   jest.clearAllMocks();
   // requireAuth's tokenVersion check (middleware/auth.js) - every
-  // authenticated request in this file goes through it now.
-  prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0 });
+  // authenticated request in this file goes through it now. A confirmed
+  // email address is the default so these tests exercise the ordinary
+  // path; the tests that care about an unconfirmed one override it.
+  prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, emailVerifiedAt: new Date() });
   // Most tests don't care about group finalization; default to "not
   // finalized" so only the tests that specifically exercise that behavior
   // need to override it.
@@ -77,6 +79,23 @@ describe("POST /api/expenses", () => {
     expect(categorizeExpense).toHaveBeenCalledWith("Dinner at Chipotle");
     expect(prisma.expense.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ category: "Food & Drink" }) })
+    );
+  });
+
+  // Adding an expense stays open to an unconfirmed account - it is the
+  // metered Cohere call inside it that gets withheld, not the feature. See
+  // middleware/requireVerifiedEmail.js for why the line is drawn there.
+  test("still creates the expense for an unconfirmed account, without calling Cohere", async () => {
+    prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, emailVerifiedAt: null });
+    prisma.groupMember.findUnique.mockResolvedValue({ groupId: 10, userId: USER_ID });
+    prisma.expense.create.mockResolvedValue({ id: 1, ...validBody, category: "Other" });
+
+    const res = await request(app).post("/api/expenses").set(AUTH).send(validBody);
+
+    expect(res.status).toBe(201);
+    expect(categorizeExpense).not.toHaveBeenCalled();
+    expect(prisma.expense.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ category: "Other" }) })
     );
   });
 

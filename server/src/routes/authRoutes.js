@@ -1,5 +1,14 @@
 const express = require("express");
-const { signup, login, forgotPassword, resetPassword, logout } = require("../controllers/authController");
+const {
+  signup,
+  login,
+  forgotPassword,
+  resetPassword,
+  logout,
+  verifyEmail,
+  resendVerification,
+} = require("../controllers/authController");
+const { requireAuth } = require("../middleware/auth");
 const { authRateLimit } = require("../middleware/rateLimit");
 
 const router = express.Router();
@@ -14,5 +23,13 @@ router.post("/reset-password", resetPassword);
 // Unauthenticated and unthrottled on purpose - see the comment on logout in
 // authController. Clearing your own stale cookie should never be blocked.
 router.post("/logout", logout);
+
+// Unauthenticated for the same reason reset-password is: the link is opened
+// from an inbox, frequently in a browser with no session. The token is the
+// authority, and it is 32 random bytes, so there is nothing to throttle.
+router.post("/verify-email", verifyEmail);
+// Authenticated and throttled, unlike the above - this one causes an email
+// to be sent, which is the part worth protecting.
+router.post("/resend-verification", requireAuth, authRateLimit, resendVerification);
 
 module.exports = router;

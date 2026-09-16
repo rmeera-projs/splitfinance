@@ -28,7 +28,7 @@ async function requireAuth(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { tokenVersion: true, isAdmin: true },
+      select: { tokenVersion: true, isAdmin: true, emailVerifiedAt: true },
     });
     if (!user || user.tokenVersion !== payload.tokenVersion) {
       // A signature that verified against a real JWT_SECRET, for a user
@@ -44,6 +44,11 @@ async function requireAuth(req, res, next) {
     // request for the tokenVersion check above, so requireAdmin below
     // doesn't need a second DB round trip.
     req.isAdmin = user.isAdmin;
+    // Read from the database on every request rather than baked into the
+    // JWT, so confirming an address takes effect immediately instead of
+    // whenever the 7-day session happens to be reissued. Same query as the
+    // tokenVersion check above, so it costs nothing extra.
+    req.emailVerified = Boolean(user.emailVerifiedAt);
     next();
   } catch (err) {
     // jwt.verify threw: a malformed, expired, or wrong-signature token.

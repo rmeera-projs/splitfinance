@@ -1,10 +1,12 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import NavBar from "./components/NavBar";
+import VerifyEmailBanner from "./components/VerifyEmailBanner";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
 import DashboardPage from "./pages/DashboardPage";
 import GroupPage from "./pages/GroupPage";
 import AccountPage from "./pages/AccountPage";
@@ -19,6 +21,7 @@ function ProtectedRoute({ children }) {
   return (
     <>
       <NavBar />
+      <VerifyEmailBanner />
       {children}
     </>
   );
@@ -31,6 +34,9 @@ export default function App() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      {/* Outside ProtectedRoute: the confirmation link is opened from an
+          inbox, often in a browser that has never signed in here. */}
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route
         path="/"
         element={

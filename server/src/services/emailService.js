@@ -50,4 +50,39 @@ async function sendPasswordResetEmail(to, resetUrl) {
   }
 }
 
-module.exports = { sendPasswordResetEmail };
+// Same contract as sendPasswordResetEmail: never throws, and never prints
+// the URL in production. The link carries a raw token that marks an address
+// verified, which is lower-stakes than a reset link but still a credential -
+// anything that can read the logs should not be able to verify addresses it
+// does not control.
+async function sendVerificationEmail(to, verifyUrl) {
+  const client = getClient();
+  if (!client) {
+    if (process.env.NODE_ENV === "production") {
+      console.warn("RESEND_API_KEY not set - skipping verification email");
+    } else {
+      console.warn("RESEND_API_KEY not set - skipping verification email (link would be):", verifyUrl);
+    }
+    return false;
+  }
+
+  try {
+    await client.emails.send({
+      from: FROM_ADDRESS,
+      to,
+      subject: "Confirm your SplitFinance email address",
+      html: `
+        <p>Welcome to SplitFinance! Confirm this address to unlock the AI-powered features.</p>
+        <p><a href="${verifyUrl}">Confirm my email address</a>. This link expires in 24 hours.</p>
+        <p>You can keep using SplitFinance in the meantime - splitting expenses and settling up work either way.</p>
+        <p>If you didn't sign up for SplitFinance, you can safely ignore this email.</p>
+      `,
+    });
+    return true;
+  } catch (err) {
+    console.error("Failed to send verification email:", err);
+    return false;
+  }
+}
+
+module.exports = { sendPasswordResetEmail, sendVerificationEmail };

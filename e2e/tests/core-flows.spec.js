@@ -188,3 +188,30 @@ test("the admin dashboard is not reachable by a normal account", async ({ page }
   await page.goto("/admin");
   await expect(page).toHaveURL("/");
 });
+
+// Email verification gates only the AI-powered features. A real browser is
+// the only place that shows both halves at once: the account works normally
+// and the one Cohere-backed control refuses, with a prompt rather than a
+// dead end. Every e2e account is freshly signed up and therefore
+// unconfirmed, so this is the default state for the whole suite.
+test("an unconfirmed account can split expenses but not use the AI parser", async ({ page }) => {
+  await signUp(page);
+
+  await expect(page.getByText(/confirm your email address to unlock/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /resend the link/i })).toBeVisible();
+
+  await createGroup(page, "Unverified Group");
+
+  // The ordinary path is untouched - this is the whole reason verification
+  // gates the AI rather than the app.
+  await page.getByPlaceholder("Description").first().fill("Coffee");
+  await page.getByPlaceholder("Amount").first().fill("6");
+  await page.getByRole("button", { name: "Add expense" }).click();
+  await expect(page.getByText("Coffee")).toBeVisible();
+
+  // The AI-backed control is the only thing that refuses, and it explains
+  // itself rather than just failing.
+  await page.getByPlaceholder(/Dinner \$60/).fill("spent 12 on lunch");
+  await page.getByRole("button", { name: "Fill in form" }).click();
+  await expect(page.getByText(/confirm your email address/i).last()).toBeVisible();
+});

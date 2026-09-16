@@ -5,6 +5,8 @@ const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { sendPasswordResetEmail } = require("../services/emailService");
 const { USERNAME_RE } = require("../utils/validators");
+const { presentUser } = require("../utils/publicUser");
+const { sendVerification, hashToken: hashVerificationToken } = require("../services/emailVerificationService");
 const { setAuthCookie, clearAuthCookie } = require("../utils/authCookie");
 const {
   logLoginFailed,
@@ -12,6 +14,7 @@ const {
   logSignup,
   logPasswordResetRequested,
   logPasswordResetCompleted,
+  logSecurityEvent,
 } = require("../services/securityLog");
 
 const SALT_ROUNDS = 10;
@@ -64,10 +67,15 @@ async function signup(req, res, next) {
     });
 
     logSignup(user.id, user.email, req.ip);
+
+    // Awaited, but it cannot fail the signup: sendVerification swallows its
+    // own errors by design, because an unreachable mail provider must not
+    // stop an account being created. The address simply stays unverified
+    // until they ask for another link.
+    await sendVerification(user);
+
     setAuthCookie(res, user);
-    res.status(201).json({
-      user: { id: user.id, name: user.name, username: user.username, email: user.email, isAdmin: user.isAdmin },
-    });
+    res.status(201).json({ user: presentUser(user) });
   } catch (err) {
     next(err);
   }
@@ -94,9 +102,7 @@ async function login(req, res, next) {
 
     logLoginSucceeded(user.id, user.email, req.ip);
     setAuthCookie(res, user);
-    res.json({
-      user: { id: user.id, name: user.name, username: user.username, email: user.email, isAdmin: user.isAdmin },
-    });
+    res.json({ user: presentUser(user) });
   } catch (err) {
     next(err);
   }
@@ -186,4 +192,63 @@ function logout(req, res) {
   res.json({ message: "Signed out." });
 }
 
-module.exports = { signup, login, forgotPassword, resetPassword, logout };
+const verifyEmailSchema = z.object({ token: z.string().min(1) });
+
+// Unauthenticated on purpose. The link arrives by email and is very often
+// opened somewhere other than the browser holding the session - a phone,
+// another profile - and requiring a session would strand exactly the people
+// doing the right thing. The token itself is 32 random bytes and is the
+// only authority needed.
+async function verifyEmail(req, res, next) {
+  try {
+    const { token } = verifyEmailSchema.parse(req.body);
+
+    const verification = await prisma.emailVerificationToken.findUnique({
+      where: { tokenHash: hashVerificationToken(token) },
+    });
+
+    if (!verification || verification.usedAt || verification.expiresAt < new Date()) {
+      throw new ApiError(400, "This confirmation link is invalid or has expired");
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: verification.userId },
+        data: { emailVerifiedAt: new Date() },
+      }),
+      prisma.emailVerificationToken.update({
+        where: { id: verification.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    logSecurityEvent("auth.email_verified", { userId: verification.userId, ip: req.ip });
+
+    res.json({ message: "Email confirmed - the AI-powered features are now available." });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Authenticated, unlike verifyEmail above: this one sends mail, so it has to
+// be tied to a real session or it becomes a way to have this server email
+// any address on request. It is also behind authRateLimit for the same
+// reason. Requesting it when already verified is a no-op rather than an
+// error - it is a button somebody can double-click.
+async function resendVerification(req, res, next) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user) throw new ApiError(404, "User not found");
+
+    if (user.emailVerifiedAt) {
+      return res.json({ message: "That address is already confirmed." });
+    }
+
+    await sendVerification(user);
+    res.json({ message: "Confirmation link sent - check your inbox." });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { signup, login, forgotPassword, resetPassword, logout, verifyEmail, resendVerification };

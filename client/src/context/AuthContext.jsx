@@ -81,6 +81,26 @@ export function AuthProvider({ children }) {
     await api.post("/auth/reset-password", { token, newPassword });
   }
 
+  // Unauthenticated on the server, so this works from a link opened in a
+  // browser with no session. When there *is* a session, the local user is
+  // refreshed afterwards so the confirmation banner disappears without a
+  // reload - the failure is ignored because a signed-out visitor confirming
+  // from their phone is the ordinary case, not an error.
+  async function verifyEmail(token) {
+    await api.post("/auth/verify-email", { token });
+    try {
+      const { data } = await api.get("/users/me", { skipAuthRedirect: true });
+      setUser(data);
+    } catch {
+      // Confirmed anyway - see above.
+    }
+  }
+
+  async function resendVerification() {
+    const { data } = await api.post("/auth/resend-verification");
+    return data.message;
+  }
+
   // Uses the server's response rather than the submitted fields directly -
   // keeps this the single place that decides what "the current user" looks
   // like after a change.
@@ -101,7 +121,19 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, signup, logout, forgotPassword, resetPassword, updateProfile, changePassword }}
+      value={{
+        user,
+        loading,
+        login,
+        signup,
+        logout,
+        forgotPassword,
+        resetPassword,
+        verifyEmail,
+        resendVerification,
+        updateProfile,
+        changePassword,
+      }}
     >
       {children}
     </AuthContext.Provider>

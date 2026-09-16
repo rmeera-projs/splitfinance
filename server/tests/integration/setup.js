@@ -25,6 +25,7 @@ jest.mock("../../src/services/expenseParsingService", () => ({
 
 jest.mock("../../src/services/emailService", () => ({
   sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
+  sendVerificationEmail: jest.fn().mockResolvedValue(true),
 }));
 
 const prisma = require("../../src/config/prisma");
@@ -39,6 +40,7 @@ async function resetDatabase() {
   await prisma.groupMember.deleteMany();
   await prisma.group.deleteMany();
   await prisma.passwordResetToken.deleteMany();
+  await prisma.emailVerificationToken.deleteMany();
   await prisma.user.deleteMany();
 }
 

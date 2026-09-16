@@ -74,6 +74,61 @@ describe("AuthContext session bootstrap", () => {
   });
 });
 
+describe("AuthContext email verification", () => {
+  // Its own probe: verifyEmail works signed out too, so this deliberately
+  // does not depend on the signed-in Probe above.
+  function VerifyProbe() {
+    const { user, loading, verifyEmail } = useAuth();
+    if (loading) return <p>loading</p>;
+    return (
+      <div>
+        <p>{user ? `verified: ${String(user.emailVerified)}` : "signed out"}</p>
+        <button onClick={() => verifyEmail("abc123")}>verify</button>
+      </div>
+    );
+  }
+
+  function renderVerify() {
+    return render(
+      <AuthProvider>
+        <VerifyProbe />
+      </AuthProvider>
+    );
+  }
+
+  // The banner has to disappear without a reload, which means the local
+  // user must be refreshed from the server after confirming.
+  test("refreshes the user after confirming so the banner clears", async () => {
+    const user = userEvent.setup();
+    api.get
+      .mockResolvedValueOnce({ data: { id: 1, name: "Alice", emailVerified: false } })
+      .mockResolvedValueOnce({ data: { id: 1, name: "Alice", emailVerified: true } });
+    api.post.mockResolvedValue({ data: { message: "Email confirmed" } });
+
+    renderVerify();
+    await screen.findByText("verified: false");
+    await user.click(screen.getByRole("button", { name: "verify" }));
+
+    expect(await screen.findByText("verified: true")).toBeInTheDocument();
+    expect(api.post).toHaveBeenCalledWith("/auth/verify-email", { token: "abc123" });
+  });
+
+  // Confirming from a phone with no session here is the ordinary case - the
+  // refresh 401s and that must not be reported as a failed confirmation.
+  test("still resolves when there is no session to refresh", async () => {
+    const user = userEvent.setup();
+    api.get.mockRejectedValue({ response: { status: 401 } });
+    api.post.mockResolvedValue({ data: { message: "Email confirmed" } });
+
+    renderVerify();
+    await screen.findByText("signed out");
+    await user.click(screen.getByRole("button", { name: "verify" }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/auth/verify-email", { token: "abc123" }));
+    expect(screen.getByText("signed out")).toBeInTheDocument();
+  });
+});
+
 describe("AuthContext login and logout", () => {
   test("takes the user from the login response, with no token to store", async () => {
     const user = userEvent.setup();
