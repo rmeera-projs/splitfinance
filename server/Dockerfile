@@ -1,6 +1,10 @@
 FROM node:20-alpine
 
-RUN apk add --no-cache openssl
+# postgresql16-client matches the postgres:16-alpine server in
+# docker-compose.yml. pg_dump refuses to dump from a server newer than
+# itself, so this pin has to move whenever the database image does.
+# scripts/migrate-and-start.sh uses pg_isready, pg_dump and psql.
+RUN apk add --no-cache openssl postgresql16-client
 
 WORKDIR /app
 
@@ -15,5 +19,12 @@ RUN npm ci
 COPY . .
 RUN npx prisma generate
 
+# Git on Windows does not preserve the executable bit, so set it here
+# rather than depending on how the repo happens to be checked out.
+RUN chmod +x scripts/*.sh
+
 EXPOSE 5000
-CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]
+# Was `npx prisma migrate deploy && npm start`. The script does the same
+# thing with a dump taken first and an automatic restore if the migration
+# fails - see server/scripts/migrate-and-start.sh.
+CMD ["./scripts/migrate-and-start.sh"]

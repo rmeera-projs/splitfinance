@@ -42,6 +42,13 @@ services:
       RESEND_FROM_ADDRESS: ${RESEND_FROM_ADDRESS:-}
     ports:
       - "5000:5000"
+    volumes:
+      # Pre-migration database dumps (see server/scripts/migrate-and-start
+      # .sh). A named volume rather than a path inside the container,
+      # because the container is rebuilt on every deploy and a rollback is
+      # most needed immediately after one - a backup that does not outlive
+      # the container it was taken in is no backup at all.
+      - dbbackups:/var/backups/splitfinance
 
   client:
     logging: *default-logging
@@ -56,3 +63,4 @@ services:
 
 volumes:
   pgdata:
+  dbbackups:

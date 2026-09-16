@@ -112,7 +112,7 @@ grep -q "$EBS_DEVICE" /etc/fstab || echo "$EBS_DEVICE /mnt/postgres-data ext4 de
 # own subdirectories too, for the same reason: /data (its certs/ACME
 # account state) and /config need to persist across replacement exactly
 # like pgdata does.
-mkdir -p /mnt/postgres-data/pgdata /mnt/postgres-data/caddy-data /mnt/postgres-data/caddy-config
+mkdir -p /mnt/postgres-data/pgdata /mnt/postgres-data/caddy-data /mnt/postgres-data/caddy-config /mnt/postgres-data/dbbackups
 
 # --- App ---
 git clone --branch "${repo_branch}" --depth 1 "${repo_url}" /opt/splitfinance
@@ -203,6 +203,18 @@ volumes:
     driver_opts:
       type: none
       device: /mnt/postgres-data/pgdata
+      o: bind
+  # The pre-migration database dumps (server/scripts/migrate-and-start.sh)
+  # get the same treatment, and for a sharper reason. Left as an ordinary
+  # Docker volume they would live on the root disk, which is destroyed
+  # whenever this template changes and the instance is replaced - while the
+  # database itself, on this EBS volume, survives. That is exactly backwards:
+  # the backups would be the only thing that could not outlive an incident.
+  dbbackups:
+    driver: local
+    driver_opts:
+      type: none
+      device: /mnt/postgres-data/dbbackups
       o: bind
 EOF
 

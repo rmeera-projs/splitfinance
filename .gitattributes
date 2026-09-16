@@ -1,11 +1,10 @@
-# Scripts that get executed on Linux (bash on an EC2 instance, inside a
-# Docker container, etc.) must always have LF line endings, regardless of
-# this being a Windows checkout - Windows' core.autocrlf can otherwise
-# silently flip them to CRLF, which is invisible in most editors and diffs
-# but breaks anything that runs the script as-is. This bit a real deploy:
-# user_data.sh.tpl picked up CRLF locally, making every `terraform plan`
-# think the (bash-only, LF) user_data baked into the running instance had
-# changed, forcing an unwanted instance replacement.
+# Shell scripts run inside Linux containers. A CRLF line ending makes the
+# shebang unusable - the kernel looks for an interpreter literally named
+# "/bin/sh" and the container fails with a bare "not found". Git on
+# Windows will happily convert them on checkout unless told otherwise.
 *.sh text eol=lf
-*.sh.tpl text eol=lf
-Dockerfile* text eol=lf
+
+# Same reasoning: these are read by tools in Linux containers.
+*.sql text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
