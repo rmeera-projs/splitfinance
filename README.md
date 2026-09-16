@@ -557,8 +557,9 @@ A few things the AWS setup adds beyond the bare instance:
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on
 every push/PR to `main` - backend lint and unit tests, the Postgres-backed
 integration suite, frontend lint/tests/build, and the Playwright end-to-end
-suite against a full Docker Compose stack. On a push to `main`, once all
-four pass, it also redeploys the AWS EC2 instance automatically - via AWS Systems Manager, not SSH, since the instance's
+suite against a full Docker Compose stack. On a push to `main` that
+actually touches the application, once all four pass, it also redeploys the AWS EC2 instance
+automatically - via AWS Systems Manager, not SSH, since the instance's
 security group intentionally only allows SSH from one trusted IP that a
 GitHub-hosted runner could never match. Authenticates to AWS via GitHub
 OIDC ([`terraform/github_oidc.tf`](terraform/github_oidc.tf)) rather than a

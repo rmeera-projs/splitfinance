@@ -165,9 +165,15 @@ unit tests.
 
 ## Deployment
 
-**Any push to `main` deploys.** CI runs four gating jobs (backend lint+unit, integration, frontend,
-Playwright) and then redeploys the EC2 instance over AWS SSM. There is no such thing as a docs-only
-push here — a README change still triggers the deploy job.
+**A push to `main` that touches the app deploys.** CI runs four gating jobs (backend lint+unit,
+integration, frontend, Playwright) and then redeploys the EC2 instance over AWS SSM. A `changes` job
+decides whether the deploy runs at all: pushes touching only `*.md`, `.github/`, `docs/`, `e2e/` or
+`.gitignore` skip it, since none of those can reach a container. Everything else deploys, and anything
+it cannot work out (a force push, a rewritten history) deploys too — failing open, because a silently
+skipped deploy leaves production behind the code. `.gitattributes` is deliberately *not* in the skip
+list: it controls line endings at checkout, and a shell script arriving with CRLF breaks the server
+image. To deploy unchanged code, or to recover from a skipped deploy, run the CI workflow manually
+from the Actions tab (`workflow_dispatch` always deploys).
 
 **`terraform apply` replaces the EC2 instance.** `user_data_replace_on_change = true`, so nearly any
 change to `terraform/user_data.sh.tpl` destroys and recreates the instance: several minutes of real
