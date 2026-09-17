@@ -395,7 +395,13 @@ review once the app was live on a real domain:
   browsers (an open redirect in react-router) was rated *moderate* while
   several criticals were in build-time-only tooling. Dependabot
   ([`dependabot.yml`](.github/dependabot.yml)) opens the upgrade PRs, which
-  run the full test suite before anyone merges them, and the Dockerfiles
+  run the full test suite before anyone merges them - monthly, with routine
+  minor/patch updates grouped into one PR per project, and the major
+  versions that were reviewed and declined (React 19, Tailwind 4, zod 4,
+  eslint 10, Prisma 7, cookie 2) ignored with the reason recorded, so they
+  don't reappear with every patch release. That throttles routine churn
+  only: Dependabot *security* updates are triggered by advisories, not the
+  schedule, and the Dockerfiles
   use `npm ci` so the tree running in production is the tree that was
   audited.
 
@@ -420,18 +426,20 @@ settlements, insights, admin) - see `server/src/routes/`.
 | Frontend | React (Vite), Tailwind CSS, React Router, Axios |
 | Backend | Node.js, Express, Prisma ORM |
 | Database | PostgreSQL |
-| Auth | JWT + bcrypt |
+| Auth | JWT in an HttpOnly, SameSite=Lax cookie; bcrypt |
 | Email | Resend (password reset links) |
 | Real-time | Socket.IO (live group activity notices) |
 | AI | Cohere Chat API (expense auto-categorization, natural-language expense entry) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
 | Infra | Docker Compose, Caddy (reverse proxy + automatic HTTPS) |
-| CI/CD | GitHub Actions (test on every PR, auto-deploy to AWS via SSM on merge) |
+| CI/CD | GitHub Actions (lint, unit, integration and Playwright on every PR; auto-deploy to AWS via SSM when a merge touches the app) |
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 24 — what CI and all three Docker images use. Node 20 is end-of-life,
+  and the frontend test tooling won't run on it at all (vitest 5 needs
+  `^22.12 || ^24`, jsdom needs `>=22.22`)
 - Docker & Docker Compose
 
 ### Setup

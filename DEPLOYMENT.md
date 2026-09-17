@@ -26,9 +26,20 @@ start; Railway is usage-based after that (no fixed monthly minimum).
    multiple services from the same repo).
 2. In that service's **Settings**:
    - **Root Directory**: `server`
-   - **Dockerfile Path**: `Dockerfile` (the existing one - it already runs
-     `prisma migrate deploy` before `npm start`, so migrations apply
-     automatically on every deploy)
+   - **Dockerfile Path**: `Dockerfile` (the existing one - its entrypoint,
+     `scripts/migrate-and-start.sh`, applies pending migrations before
+     `npm start`, taking a `pg_dump` first and restoring it automatically if
+     a migration fails)
+
+     Two caveats that apply to Railway specifically, since the script was
+     built for the AWS deployment. The dumps are written inside the
+     container, which on Railway is ephemeral unless you attach a volume at
+     `/var/backups/splitfinance`, so they won't survive a redeploy. And the
+     image ships `postgresql16-client`: `pg_dump` refuses to dump from a
+     *newer* Postgres major than itself, so if Railway's database is newer
+     than 16 the pre-migration backup fails - and the script deliberately
+     refuses to migrate without one, which fails the deploy. Match the
+     client version in `server/Dockerfile` to your database if so.
 3. In **Variables**, add:
    | Variable | Value |
    |---|---|
@@ -105,13 +116,25 @@ This section only applies if you're running the [Terraform/AWS](terraform/)
 deployment instead of Railway - Railway already auto-deploys on push (see
 above) with no GitHub Actions setup needed.
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs backend
-(Jest) and frontend (Vitest + build) tests on every push and pull request to
-`main`. On a **push** to `main` - i.e. after a PR merges - and only if both
-test jobs pass, a third job deploys via **AWS Systems Manager**: it runs the
-same update you'd otherwise do by hand (pull the latest code,
-`docker compose up -d --build`) as a command sent to the instance through
-AWS's API, not over SSH.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on
+every push and pull request to `main`: backend lint + unit tests, the
+Postgres-backed integration suite, frontend lint/tests/build, and the
+Playwright end-to-end suite. On a **push** to `main` - i.e. after a PR
+merges - and only if all four pass, a deploy job runs via **AWS Systems
+Manager**: it does the same update you'd otherwise do by hand (pull the
+latest code, `docker compose up -d --build`) as a command sent to the
+instance through AWS's API, not over SSH.
+
+Not every push deploys. A `changes` job diffs the push and skips the deploy
+when everything touched is `*.md`, `.github/`, `docs/`, `e2e/` or
+`.gitignore` - none of which can reach a container, and a rebuild for them
+would take the site down for half a minute to ship nothing. It fails open:
+anything it can't work out (a force push, a rewritten history) deploys.
+`.gitattributes` is deliberately not skipped, because it controls line
+endings at checkout and a shell script arriving with CRLF breaks the server
+image. To redeploy unchanged code, or recover from a skipped deploy, run the
+workflow manually from the Actions tab - a manual run on `main` always
+deploys.
 
 This is deliberate, not incidental: the instance's security group only
 allows SSH from one trusted IP (`allowed_ssh_cidr` in
@@ -129,8 +152,10 @@ The deploy job authenticates to AWS via **GitHub OIDC**
 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repo secret to create or
 rotate at all. Each run mints a short-lived credential by exchanging a
 GitHub-issued OIDC token for the `splitfinance-github-actions-deploy` IAM
-role, which trusts *only* this repo's own workflow runs on pushes to
-`main` (enforced by the role's trust policy, not just convention) and can
+role, which trusts *only* this repo's own workflow runs on the `main`
+branch - a push, or a manual run from the Actions tab - enforced by the
+role's trust policy (its `sub` condition is the `main` ref), not just
+convention; pull-request runs can't assume it. The role can
 do nothing beyond `ec2:DescribeInstances`/`ssm:SendCommand`/
 `ssm:GetCommandInvocation` - it has no access to any other AWS resource or
 service in the account. `terraform apply` (with the OIDC provider/role in
