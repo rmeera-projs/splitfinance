@@ -3,11 +3,15 @@ import { Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
+import BalancesPanel from "../components/BalancesPanel";
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const [groups, setGroups] = useState([]);
   const [insightItems, setInsightItems] = useState([]);
+  // null until loaded, and left null if the request fails - the panel then
+  // simply doesn't render, rather than showing a misleading "all settled up".
+  const [balances, setBalances] = useState(null);
   const [newGroupName, setNewGroupName] = useState("");
   const [memberIdentifiers, setMemberIdentifiers] = useState("");
   const [error, setError] = useState("");
@@ -17,6 +21,10 @@ export default function DashboardPage() {
     api
       .get("/insights")
       .then(({ data }) => setInsightItems(data.items))
+      .catch(() => {});
+    api
+      .get("/users/me/balances")
+      .then(({ data }) => setBalances(data))
       .catch(() => {});
   }, []);
 
@@ -57,6 +65,15 @@ export default function DashboardPage() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Hi, {user?.name}</h1>
       </div>
+
+      {/* Above spending on purpose: who you owe is the thing you open a
+          bill-splitting app to find out. */}
+      {balances && (
+        <section className="mb-8">
+          <h2 className="font-semibold mb-2">Balances</h2>
+          <BalancesPanel balances={balances} />
+        </section>
+      )}
 
       <section className="mb-8">
         <h2 className="font-semibold mb-2">Your Spending</h2>

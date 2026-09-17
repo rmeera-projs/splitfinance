@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Docker's default json-file log driver has no size limit at all, so
 # container output grows until it fills the disk. That was survivable when
 # the server barely logged; it is not now that every security event is

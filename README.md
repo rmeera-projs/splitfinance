@@ -80,10 +80,15 @@ Everything below is the detail — [Features](#-features) first, then the
 - **Natural-Language Expense Entry** — type something like "Dinner $60, I
   paid, split with Bob and Charlie" and Cohere parses it into the
   add-expense form's fields for you to review before submitting
-- **Balances** — real-time "who owes whom" view per group
+- **Balances** — real-time "who owes whom" view per group, plus a
+  dashboard rollup of what you owe and are owed by each person across all
+  your groups, netted across groups with a per-group breakdown linking to
+  where each balance can be settled
 - **Debt Simplification** — a graph-reduction algorithm that collapses a tangled
   web of IOUs into at most n−1 transactions for an n-person group
-- **Settlements** — record payments between members, right from the balances view
+- **Settlements** — record payments between members, right from the balances view;
+  the amount starts at the full balance, and editing it down records a
+  partial payment
 - **Finalize / Reopen** — lock a group to stop new expenses once a trip/bill is
   done, without blocking settling up; any member can finalize or reopen
 - **Manual Category Override** — any group member can correct a bad
@@ -281,12 +286,19 @@ review once the app was live on a real domain:
   group members, expense payers - uses `groupUserSelect` instead.
 - **Settlements are validated against the actual balance, server-side** -
   `createSettlement` rejects an amount that's `<= 0`, exceeds what's
-  currently owed between those two specific users
-  (`balanceService.getBalanceBetweenUsers`, a direct pairwise total - not
-  the debt-simplified group graph, which can route a person's debt through
-  a third party), runs in the wrong direction, or names the requester as
+  currently owed, runs in the wrong direction, or names the requester as
   both parties. Partial settlements (paying off less than the full
-  balance) are intentionally still allowed.
+  balance) are allowed. "Currently owed" means the group's *simplified*
+  debts - the same list the group page shows and settles from, computed in
+  one place ([`balanceService.js`](server/src/services/balanceService.js)).
+  It originally checked the direct balance between the two people instead,
+  which disagrees whenever simplification routes a debt through someone
+  else: if Carol owes Bob and Bob owes Alice, the page shows "Carol owes
+  Alice", but directly Carol owes Alice nothing. That broke settling both
+  ways - the server refused payments the page was offering, and accepted
+  ones the page said weren't owed, quietly creating a new debt. Neither
+  case can occur in a two-person group, which is why the browser tests
+  missed it; a three-person integration test now pins both directions.
 - **The session token is unreachable from JavaScript** - it lives in an
   HttpOnly, SameSite=Lax cookie ([`authCookie.js`](server/src/utils/authCookie.js))
   rather than `localStorage`, so a script injected into the page can't read
@@ -417,7 +429,7 @@ splitfinance/
 ```
 
 ### API Surface
-24 REST endpoints across 7 resources (auth, users, groups, expenses,
+25 REST endpoints across 7 resources (auth, users, groups, expenses,
 settlements, insights, admin) - see `server/src/routes/`.
 
 ### Tech Stack
@@ -627,21 +639,21 @@ incident.
 
 ## 🧪 Testing
 
-404 tests across three layers, deliberately rather than incidentally: a
+442 tests across three layers, deliberately rather than incidentally: a
 fast mocked layer for logic, a real-database layer for everything mocks
 structurally can't prove, and a browser layer for the flows a user actually
 performs.
 
 | Layer | Count | What's real | What's mocked |
 |---|---|---|---|
-| Unit | 349 (222 backend, 127 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
-| Integration | 44 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
-| End-to-end | 11 | everything — real browser, real API, real database | nothing |
+| Unit | 376 (232 backend, 144 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
+| Integration | 53 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
+| End-to-end | 13 | everything — real browser, real API, real database | nothing |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 222 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 127 (Vitest + React Testing Library)
+cd server && npm test        # 232 (Jest + Supertest, Prisma mocked)
+cd client && npm test        # 144 (Vitest + React Testing Library)
 ```
 
 **Integration** (`server/tests/integration/`) runs the real app against a
@@ -671,7 +683,7 @@ touches local development data.
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p splitfinance-e2e up -d --build
 cd e2e && npm install && npx playwright install chromium
-npm test                     # 11 flows
+npm test                     # 13 flows
 npm run screenshots          # regenerates the README images from the live app
 ```
 
@@ -750,12 +762,13 @@ correction afterwards that may or may not land.
 - [x] Admin dashboard - platform-wide counts (users, groups, expenses,
   settlements, total money moved) and a recent-signups/recent-groups
   glance, gated behind a `User.isAdmin` flag
-- [ ] Settle up a custom (partial) amount - settling currently always pays
-  off a balance in full; there's no way to record a partial payment toward
-  what you owe someone
-- [ ] Per-person balances on the dashboard - the main page currently only
-  shows spending totals and a group list, with no rollup of how much you
-  owe (or are owed by) each specific person across all your shared groups
+- [x] Settle up a custom (partial) amount - Settle up opens an amount field
+  pre-filled with the full balance; editing it down records a partial
+  payment. The API had accepted partial payments for a while, but nothing
+  in the UI could send one
+- [x] Per-person balances on the dashboard - what you owe and are owed by
+  each person across all shared groups, netted across groups, with a
+  per-group breakdown since settling still happens one group at a time
 - [ ] A conversational balances/insights assistant - ask "how much did I
   spend on food this month?" or "who do I owe the most right now?" in a
   chat box on the dashboard; a genuine tool-calling agent rather than a

@@ -2,7 +2,8 @@ const bcrypt = require("bcrypt");
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
-const { publicUserSelect, presentUser } = require("../utils/publicUser");
+const { publicUserSelect, groupUserSelect, presentUser } = require("../utils/publicUser");
+const { getUserBalances } = require("../services/balanceService");
 const { USERNAME_RE } = require("../utils/validators");
 const { setAuthCookie } = require("../utils/authCookie");
 
@@ -29,6 +30,31 @@ async function getMe(req, res, next) {
     const user = await prisma.user.findUnique({ where: { id: req.userId }, select: publicUserSelect });
     if (!user) throw new ApiError(404, "User not found");
     res.json(presentUser(user));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// What the signed-in user owes, and is owed, per person across every group
+// they share. Everyone listed is necessarily a co-member of some group with
+// the user - no debt can exist otherwise - so they get the same
+// name/username-only shape as every other member on a group page, never
+// email.
+async function getMyBalances(req, res, next) {
+  try {
+    const summary = await getUserBalances(req.userId);
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: summary.people.map((p) => p.userId) } },
+      select: groupUserSelect,
+    });
+    const userById = new Map(users.map((u) => [u.id, u]));
+
+    res.json({
+      totalOwedToYou: summary.totalOwedToYou,
+      totalYouOwe: summary.totalYouOwe,
+      people: summary.people.map(({ userId, net, groups }) => ({ user: userById.get(userId), net, groups })),
+    });
   } catch (err) {
     next(err);
   }
@@ -98,4 +124,4 @@ async function changePassword(req, res, next) {
   }
 }
 
-module.exports = { getMe, updateProfile, changePassword };
+module.exports = { getMe, getMyBalances, updateProfile, changePassword };

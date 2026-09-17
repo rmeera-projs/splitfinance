@@ -478,25 +478,92 @@ describe("GroupPage - settling up", () => {
     expect(screen.getAllByText("Settle up")).toHaveLength(1);
   });
 
-  test("records a settlement for the balance the user owes", async () => {
+  async function openSettleForm(amount = 1000) {
     const user = userEvent.setup();
     mockGroupResponse({
-      data: baseGroup({ balances: [{ from: ME.id, to: OTHER.id, amount: 1000 }] }),
+      data: baseGroup({ balances: [{ from: ME.id, to: OTHER.id, amount }] }),
     });
-    api.post.mockResolvedValue({ data: {} });
-
     renderGroupPage();
-    await screen.findByText("Settle up");
+    await user.click(await screen.findByText("Settle up"));
+    return user;
+  }
 
-    await user.click(screen.getByText("Settle up"));
+  // Paying in full stays one click away: the field arrives holding the whole
+  // balance, so the common case is just confirming it.
+  test("pre-fills the full balance and records it", async () => {
+    api.post.mockResolvedValue({ data: {} });
+    const user = await openSettleForm(1000);
+
+    expect(screen.getByLabelText("Settlement amount")).toHaveValue("10.00");
+    await user.click(screen.getByRole("button", { name: "Record payment" }));
 
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith("/settlements", {
-        groupId: 7,
-        toUser: OTHER.id,
-        amount: 1000,
-      })
+      expect(api.post).toHaveBeenCalledWith("/settlements", { groupId: 7, toUser: OTHER.id, amount: 1000 })
     );
+  });
+
+  test("records a partial payment when the amount is edited down", async () => {
+    api.post.mockResolvedValue({ data: {} });
+    const user = await openSettleForm(1000);
+
+    const input = screen.getByLabelText("Settlement amount");
+    await user.clear(input);
+    await user.type(input, "4.25");
+    await user.click(screen.getByRole("button", { name: "Record payment" }));
+
+    // Sent as integer cents, like every other amount on the wire.
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/settlements", { groupId: 7, toUser: OTHER.id, amount: 425 })
+    );
+  });
+
+  test("refuses more than is owed without calling the API", async () => {
+    const user = await openSettleForm(1000);
+
+    const input = screen.getByLabelText("Settlement amount");
+    await user.clear(input);
+    await user.type(input, "10.01");
+    await user.click(screen.getByRole("button", { name: "Record payment" }));
+
+    expect(await screen.findByText(/more than you owe/i)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  test.each([["0"], ["abc"], ["1.234"], [""]])("refuses an invalid amount (%j) without calling the API", async (value) => {
+    const user = await openSettleForm(1000);
+
+    const input = screen.getByLabelText("Settlement amount");
+    await user.clear(input);
+    if (value) await user.type(input, value);
+    await user.click(screen.getByRole("button", { name: "Record payment" }));
+
+    expect(await screen.findByText(/enter a valid amount/i)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  // The server re-checks against the live balance, which can have moved
+  // since the page loaded. Its refusal belongs next to the form, not in an
+  // alert() that throws away what the user typed.
+  test("shows the server's refusal inline and keeps the form open", async () => {
+    api.post.mockRejectedValue({
+      response: { data: { error: "Settlement amount cannot exceed the outstanding balance" } },
+    });
+    const user = await openSettleForm(1000);
+
+    await user.click(screen.getByRole("button", { name: "Record payment" }));
+
+    expect(await screen.findByText(/cannot exceed the outstanding balance/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Settlement amount")).toBeInTheDocument();
+  });
+
+  test("cancel closes the form without recording anything", async () => {
+    const user = await openSettleForm(1000);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("Settlement amount")).not.toBeInTheDocument();
+    expect(screen.getByText("Settle up")).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
   });
 });
 

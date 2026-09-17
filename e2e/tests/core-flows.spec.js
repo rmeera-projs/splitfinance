@@ -78,13 +78,79 @@ test("settling up clears the balance", async ({ page, browser }) => {
 
   await expect(page.getByText(/\$25\.00/).first()).toBeVisible();
 
-  // Settling asks for confirmation via window.confirm, which Playwright
-  // auto-dismisses unless something opts in - without this the click is a
-  // no-op and the balance silently stays put.
-  page.on("dialog", (dialog) => dialog.accept());
+  // Settle up opens an amount field holding the full balance; recording it
+  // unchanged pays the whole thing.
   await page.getByRole("button", { name: "Settle up" }).click();
+  await expect(page.getByLabel("Settlement amount")).toHaveValue("25.00");
+  await page.getByRole("button", { name: "Record payment" }).click();
 
   await expect(page.getByText(/Everyone is settled up/)).toBeVisible();
+});
+
+// Partial payments were always accepted by the API but unreachable from the
+// UI. Driven in a real browser because the round trip is the point: the
+// amount typed as dollars has to arrive as cents, be checked against the
+// live balance, and leave the right remainder on screen.
+test("records a partial settlement and leaves the remainder owing", async ({ page, browser }) => {
+  const debtor = uniqueUser("debtor");
+  const debtorContext = await browser.newContext();
+  await signUp(await debtorContext.newPage(), debtor);
+  await debtorContext.close();
+
+  const payerContext = await browser.newContext();
+  const payerPage = await payerContext.newPage();
+  await signUp(payerPage);
+  await createGroup(payerPage, "Partial Trip", [debtor.username]);
+  await payerPage.getByPlaceholder("Description").first().fill("Hotel");
+  await payerPage.getByPlaceholder("Amount").first().fill("100");
+  await payerPage.getByRole("button", { name: "Add expense" }).click();
+  await expect(payerPage.getByText(/\$50\.00/).first()).toBeVisible();
+  const groupUrl = payerPage.url();
+  await payerContext.close();
+
+  await logIn(page, debtor);
+  await page.waitForURL("/");
+  await page.goto(groupUrl);
+
+  await page.getByRole("button", { name: "Settle up" }).click();
+  const amount = page.getByLabel("Settlement amount");
+  await amount.fill("20.50");
+  await page.getByRole("button", { name: "Record payment" }).click();
+
+  // $50.00 owed, $20.50 paid: $29.50 remains, and the debt is still listed.
+  await expect(page.getByText(/owes .* \$29\.50/)).toBeVisible();
+  await expect(page.getByText(/Everyone is settled up/)).toHaveCount(0);
+});
+
+// The dashboard answers "who do I owe" across every group without opening
+// each one. Both sides are checked because the sign is the easiest thing to
+// get backwards, and backwards means telling someone they're owed money
+// they actually owe.
+test("shows per-person balances on the dashboard for both people", async ({ page, browser }) => {
+  const friend = uniqueUser("friend");
+  const friendContext = await browser.newContext();
+  const friendPage = await friendContext.newPage();
+  await signUp(friendPage, friend);
+
+  const me = await signUp(page);
+  await createGroup(page, "Balances Club", [friend.username]);
+  // Not "Groceries" - that is also a category name, so it matches a hidden
+  // <option> in the category dropdown before it matches the expense.
+  await page.getByPlaceholder("Description").first().fill("Farmers market haul");
+  await page.getByPlaceholder("Amount").first().fill("30");
+  await page.getByRole("button", { name: "Add expense" }).click();
+  await expect(page.getByText("Farmers market haul")).toBeVisible();
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Balances" })).toBeVisible();
+  await expect(page.getByText(/owes you \$15\.00/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Balances Club" }).first()).toBeVisible();
+
+  await friendPage.goto("/");
+  await expect(friendPage.getByText(me.name, { exact: true })).toBeVisible();
+  await expect(friendPage.getByText(/you owe \$15\.00/)).toBeVisible();
+
+  await friendContext.close();
 });
 
 // Money is integer cents end to end, so the one case worth driving through

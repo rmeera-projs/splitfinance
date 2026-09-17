@@ -2,7 +2,7 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { assertGroupMembers } = require("../utils/assertGroupMembers");
-const { getBalanceBetweenUsers } = require("../services/balanceService");
+const { getGroupBalances } = require("../services/balanceService");
 const { emitGroupActivity } = require("../services/realtimeService");
 
 const createSettlementSchema = z.object({
@@ -39,7 +39,19 @@ async function createSettlement(req, res, next) {
     // Settling more than is actually owed must be rejected server-side -
     // the client-side form isn't a trust boundary. Partial settlements
     // (paying off less than the full balance) are intentionally allowed.
-    const balance = await getBalanceBetweenUsers(groupId, req.userId, toUser);
+    //
+    // "Owed" means the simplified debts - the same list the group page shows
+    // and settles from - not the direct balance between these two people.
+    // The two disagree whenever simplification routes a debt through a third
+    // person, and checking against the direct figure broke settling in both
+    // directions: it refused debts the page displayed (Carol owes Bob, Bob
+    // owes Alice, so the page says Carol owes Alice, but directly she owes
+    // her nothing), and it accepted payments the page said weren't owed,
+    // quietly creating a new debt. Simplification preserves everyone's net
+    // position, so paying along a simplified edge is always a legitimate
+    // settlement.
+    const debts = await getGroupBalances(groupId);
+    const balance = debts.find((d) => d.from === req.userId && d.to === toUser)?.amount ?? 0;
     if (balance <= 0) {
       throw new ApiError(400, "You don't owe this person anything in this group");
     }

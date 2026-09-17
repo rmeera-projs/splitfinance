@@ -56,6 +56,16 @@ export default function GroupPage() {
   const [editSplitValues, setEditSplitValues] = useState({});
   const [editError, setEditError] = useState("");
 
+  // Settling up is an inline form on the balance row rather than a confirm()
+  // dialog, because it now takes an amount: the field is pre-filled with the
+  // full balance, so paying in full is still one click, and editing it down
+  // records a partial payment. Only one row is open at a time, keyed by the
+  // debt's from/to pair.
+  const [settlingKey, setSettlingKey] = useState(null);
+  const [settleAmount, setSettleAmount] = useState("");
+  const [settleError, setSettleError] = useState("");
+  const [settleSaving, setSettleSaving] = useState(false);
+
   const [memberIdentifiers, setMemberIdentifiers] = useState("");
   const [memberError, setMemberError] = useState("");
 
@@ -329,20 +339,50 @@ export default function GroupPage() {
     }
   }
 
+  const balanceKey = (b) => `${b.from}-${b.to}`;
+
+  function openSettle(balance) {
+    setSettlingKey(balanceKey(balance));
+    setSettleAmount(centsToInputValue(balance.amount));
+    setSettleError("");
+  }
+
+  function closeSettle() {
+    setSettlingKey(null);
+    setSettleError("");
+  }
+
   // Settlements are always recorded as "the current user paid" - the API
   // takes fromUser from the auth token, not the request body, so this is
   // only ever shown for balances where the current user is the one who owes.
-  async function handleSettleUp(balance) {
-    if (!window.confirm(`Record that you paid ${nameFor(balance.to)} $${formatCents(balance.amount)}?`)) return;
+  //
+  // The checks here mirror settlementController's, so an obvious mistake is
+  // caught before a round trip - but they are a convenience, not the
+  // boundary. The server re-checks against the live balance, which matters
+  // because someone else may have changed the group since this page loaded.
+  async function handleSettleUp(e, balance) {
+    e.preventDefault();
+    setSettleError("");
+
+    const cents = parseAmountToCents(settleAmount);
+    if (cents === null || cents <= 0) {
+      setSettleError("Enter a valid amount, like 12.34");
+      return;
+    }
+    if (cents > balance.amount) {
+      setSettleError(`That's more than you owe - the balance is $${formatCents(balance.amount)}`);
+      return;
+    }
+
+    setSettleSaving(true);
     try {
-      await api.post("/settlements", {
-        groupId: Number(id),
-        toUser: balance.to,
-        amount: balance.amount,
-      });
+      await api.post("/settlements", { groupId: Number(id), toUser: balance.to, amount: cents });
+      closeSettle();
       fetchGroup();
     } catch (err) {
-      alert(err.response?.data?.error || "Failed to record settlement");
+      setSettleError(err.response?.data?.error || "Failed to record settlement");
+    } finally {
+      setSettleSaving(false);
     }
   }
 
@@ -436,19 +476,53 @@ export default function GroupPage() {
           <p className="text-sm text-gray-500">Everyone is settled up 🎉</p>
         )}
         <ul className="space-y-1">
-          {group.balances.map((b, i) => (
-            <li key={i} className="text-sm bg-white border rounded p-2 flex items-center justify-between gap-2">
-              <span>
-                <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
-                <span className="font-medium">{nameFor(b.to)}</span> ${formatCents(b.amount)}
-              </span>
-              {b.from === user.id && (
-                <button
-                  onClick={() => handleSettleUp(b)}
-                  className="text-xs text-emerald-600 hover:underline shrink-0"
-                >
-                  Settle up
-                </button>
+          {group.balances.map((b) => (
+            <li key={balanceKey(b)} className="text-sm bg-white border rounded p-2">
+              <div className="flex items-center justify-between gap-2">
+                <span>
+                  <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
+                  <span className="font-medium">{nameFor(b.to)}</span> ${formatCents(b.amount)}
+                </span>
+                {b.from === user.id && settlingKey !== balanceKey(b) && (
+                  <button
+                    onClick={() => openSettle(b)}
+                    className="text-xs text-emerald-600 hover:underline shrink-0"
+                  >
+                    Settle up
+                  </button>
+                )}
+              </div>
+
+              {settlingKey === balanceKey(b) && (
+                <form onSubmit={(e) => handleSettleUp(e, b)} className="mt-2 space-y-2">
+                  <label className="block text-xs text-gray-600" htmlFor={`settle-${balanceKey(b)}`}>
+                    How much did you pay {nameFor(b.to)}? Less than ${formatCents(b.amount)} records a partial
+                    payment.
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-gray-500">$</span>
+                    <input
+                      id={`settle-${balanceKey(b)}`}
+                      className="w-28 border rounded px-2 py-1"
+                      inputMode="decimal"
+                      aria-label="Settlement amount"
+                      value={settleAmount}
+                      onChange={(e) => setSettleAmount(e.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      disabled={settleSaving}
+                      className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded font-medium hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {settleSaving ? "Recording..." : "Record payment"}
+                    </button>
+                    <button type="button" onClick={closeSettle} className="text-xs text-gray-500 hover:underline">
+                      Cancel
+                    </button>
+                  </div>
+                  {settleError && <p className="text-xs text-red-600">{settleError}</p>}
+                </form>
               )}
             </li>
           ))}

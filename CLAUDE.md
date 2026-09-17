@@ -71,6 +71,18 @@ are the only places that convert.
 - `Int` in Postgres caps at **$21,474,836.47**, which is lower than the old `NUMERIC(10,2)` ceiling.
   The migration that converted the columns guards against overflow for this reason.
 
+### There is one definition of "who owes whom"
+
+`server/src/services/balanceService.js` computes a group's **simplified** debts, and everything that
+needs to know what is owed goes through it: the group page lists them, Settle up pays them,
+`settlementController` validates payments against them, and the dashboard's per-person balances
+(`GET /api/users/me/balances`) add them up across groups.
+
+Do not derive a second notion of balance. Settlements were once validated against the *direct* balance
+between two people, which disagrees with the simplified debts whenever simplification routes a debt
+through a third person — so the server refused payments the page offered and accepted ones it didn't,
+silently creating debts. It is invisible in a two-person group; test balance logic with at least three.
+
 ### Auth is an HttpOnly cookie, not a bearer token
 
 `server/src/utils/authCookie.js` owns the cookie and its flags. Consequences that span files:

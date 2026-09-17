@@ -22,13 +22,19 @@ function renderDashboard() {
   );
 }
 
-// Dispatches api.get by URL - the dashboard fetches both /groups and
-// /insights on mount (and re-fetches /groups after creating a group), so a
-// single mockResolvedValue would answer both endpoints with the same shape.
-function mockApiGet({ groups, insightItems = [] }) {
+const NO_BALANCES = { totalOwedToYou: 0, totalYouOwe: 0, people: [] };
+
+// Dispatches api.get by URL - the dashboard fetches /groups, /insights and
+// /users/me/balances on mount (and re-fetches /groups after creating a
+// group), so a single mockResolvedValue would answer every endpoint with the
+// same shape. `balances` may be an Error to simulate that request failing.
+function mockApiGet({ groups, insightItems = [], balances = NO_BALANCES }) {
   api.get.mockImplementation((url) => {
     if (url === "/insights") {
       return Promise.resolve({ data: { items: insightItems } });
+    }
+    if (url === "/users/me/balances") {
+      return balances instanceof Error ? Promise.reject(balances) : Promise.resolve({ data: balances });
     }
     return Promise.resolve({ data: groups });
   });
@@ -120,5 +126,36 @@ describe("DashboardPage", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(await screen.findByText(/nobody@example.com/)).toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage - balances", () => {
+  test("shows per-person balances from the server", async () => {
+    mockApiGet({
+      groups: [],
+      balances: {
+        totalOwedToYou: 2500,
+        totalYouOwe: 0,
+        people: [{ user: { id: 2, name: "Bob", username: "bob" }, net: 2500, groups: [{ id: 7, name: "Trip", amount: 2500 }] }],
+      },
+    });
+
+    renderDashboard();
+
+    expect(await screen.findByRole("heading", { name: "Balances" })).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledWith("/users/me/balances");
+  });
+
+  // A failed request must not render as "all settled up" - that would be a
+  // confident, wrong answer to the one question this panel exists for.
+  test("shows nothing, rather than a false all-clear, when the request fails", async () => {
+    mockApiGet({ groups: [], balances: new Error("network down") });
+
+    renderDashboard();
+    await screen.findByText(/no groups yet/i);
+
+    expect(screen.queryByRole("heading", { name: "Balances" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/settled up/i)).not.toBeInTheDocument();
   });
 });
