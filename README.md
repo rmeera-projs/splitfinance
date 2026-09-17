@@ -9,8 +9,9 @@ the math allows.
 React (Vite) · Node/Express · PostgreSQL + Prisma · Socket.IO · Cohere ·
 Docker · Terraform on AWS EC2 · GitHub Actions CI/CD
 
-![The SplitFinance dashboard: per-category and per-group spending
-breakdowns above a list of your groups](docs/screenshots/dashboard.png)
+![The SplitFinance dashboard: what you're owed and what you owe, per person
+across all your groups, above per-category and per-group spending
+breakdowns](docs/screenshots/dashboard.png)
 
 <details>
 <summary><b>A group in detail</b> — balances, AI-categorised insights, and the add-expense form</summary>
@@ -750,25 +751,19 @@ always reconcile against the total exactly rather than relying on a
 correction afterwards that may or may not land.
 
 ## 🗺️ Roadmap
-- [x] WebSocket-based real-time updates
-- [x] Natural-language expense entry - type "Dinner $60, I paid, split with
-  Bob and Charlie" into a text box on the add-expense form and Cohere
-  parses it into `{description, amount, payerId, splitWithIds}`, pre-filling
-  the form for you to confirm (never submits on its own)
-- [x] Choose who an expense splits between when adding it - a "Split
-  between" checkbox list (defaulting to everyone) now applies to every
-  split type, including "equal" - excluding someone no longer requires the
-  exact/percentage workaround of leaving their amount blank
-- [x] Admin dashboard - platform-wide counts (users, groups, expenses,
-  settlements, total money moved) and a recent-signups/recent-groups
-  glance, gated behind a `User.isAdmin` flag
-- [x] Settle up a custom (partial) amount - Settle up opens an amount field
-  pre-filled with the full balance; editing it down records a partial
-  payment. The API had accepted partial payments for a while, but nothing
-  in the UI could send one
-- [x] Per-person balances on the dashboard - what you owe and are owed by
-  each person across all shared groups, netted across groups, with a
-  per-group breakdown since settling still happens one group at a time
+
+### Next up
+- [ ] Search/filter expenses within a group (by description, category, date
+  range, or payer) - not needed with a handful of test expenses, but a real
+  gap once a group's activity feed grows past a screenful
+- [ ] CSV export of a group's expenses and settlements - useful for
+  record-keeping or reconciling outside the app
+- [ ] Ship the security logs somewhere - they're structured JSON precisely
+  so that "every failed login for this address in the last hour" is a query
+  rather than a parser someone has to write, but right now reading them
+  still means `docker compose logs` on the instance
+
+### Later
 - [ ] A conversational balances/insights assistant - ask "how much did I
   spend on food this month?" or "who do I owe the most right now?" in a
   chat box on the dashboard; a genuine tool-calling agent rather than a
@@ -790,6 +785,37 @@ correction afterwards that may or may not land.
 - [ ] Duplicate-expense detection - flag a newly-added expense that looks
   like an accidental double-entry of a recent one (similar description,
   amount, and date)
+- [ ] CAPTCHA on signup/login after repeated attempts - deliberately not
+  built yet: it needs a third-party provider and keys, and shipping an
+  inert code path waiting for them is worse than not having it. The per-IP
+  rate limits, the bulk-signup warnings, and email verification cover the
+  same ground for now
+- [ ] Recurring expenses (rent, subscriptions)
+- [ ] Email notifications on new expenses
+- [ ] Multi-currency support - right now every amount is an unlabeled
+  number (implicitly one currency); real trips/roommate groups often mix
+  currencies
+
+### Shipped
+- [x] WebSocket-based real-time updates
+- [x] Natural-language expense entry - type "Dinner $60, I paid, split with
+  Bob and Charlie" into a text box on the add-expense form and Cohere
+  parses it into `{description, amount, payerId, splitWithIds}`, pre-filling
+  the form for you to confirm (never submits on its own)
+- [x] Choose who an expense splits between when adding it - a "Split
+  between" checkbox list (defaulting to everyone) now applies to every
+  split type, including "equal" - excluding someone no longer requires the
+  exact/percentage workaround of leaving their amount blank
+- [x] Admin dashboard - platform-wide counts (users, groups, expenses,
+  settlements, total money moved) and a recent-signups/recent-groups
+  glance, gated behind a `User.isAdmin` flag
+- [x] Settle up a custom (partial) amount - Settle up opens an amount field
+  pre-filled with the full balance; editing it down records a partial
+  payment. The API had accepted partial payments for a while, but nothing
+  in the UI could send one
+- [x] Per-person balances on the dashboard - what you owe and are owed by
+  each person across all shared groups, netted across groups, with a
+  per-group breakdown since settling still happens one group at a time
 - [x] Move the session off `localStorage` into an HttpOnly cookie - the JWT
   was readable by any script on the page and replayable for its full 7-day
   life; it's now an HttpOnly, SameSite=Lax cookie the app can't see. Brought
@@ -809,29 +835,10 @@ correction afterwards that may or may not land.
   schedule, plus Dependabot upgrade PRs that run the full test suite
 - [x] Security event logging - structured JSON events that escalate to a
   warning when the same thing keeps happening from the same source
-- [ ] CAPTCHA on signup/login after repeated attempts - deliberately not
-  built yet: it needs a third-party provider and keys, and shipping an
-  inert code path waiting for them is worse than not having it. The per-IP
-  rate limits, the bulk-signup warnings, and email verification cover the
-  same ground for now
-- [ ] Ship the security logs somewhere - they're structured JSON precisely
-  so that "every failed login for this address in the last hour" is a query
-  rather than a parser someone has to write, but right now reading them
-  still means `docker compose logs` on the instance
-- [ ] Recurring expenses (rent, subscriptions)
-- [ ] Email notifications on new expenses
 - [x] Password reset flow
 - [x] Rate limiting on auth endpoints - `signup`/`login`/`forgot-password`
   are capped at 10 requests/15min/IP via `express-rate-limit`
   ([rateLimit.js](server/src/middleware/rateLimit.js))
-- [ ] Search/filter expenses within a group (by description, category, date
-  range, or payer) - not needed with a handful of test expenses, but a real
-  gap once a group's activity feed grows past a screenful
-- [ ] Multi-currency support - right now every amount is an unlabeled
-  number (implicitly one currency); real trips/roommate groups often mix
-  currencies
-- [ ] CSV export of a group's expenses and settlements - useful for
-  record-keeping or reconciling outside the app
 
 ## 📄 License
 MIT
