@@ -4,17 +4,14 @@ const { ApiError } = require("../middleware/errorHandler");
 const { assertGroupMembers } = require("../utils/assertGroupMembers");
 const { getGroupBalances } = require("../services/balanceService");
 const { emitGroupActivity } = require("../services/realtimeService");
+const { id, amountInCents } = require("../utils/validators");
 
 const createSettlementSchema = z.object({
-  groupId: z.number(),
-  toUser: z.number(),
+  groupId: id("Group"),
+  toUser: id("Recipient"),
   // Integer cents, like every other amount on the wire - see
-  // src/utils/money.js.
-  amount: z
-    .number()
-    .int("Amounts must be given in whole cents")
-    .positive()
-    .max(2147483647, "Amount is too large"),
+  // src/utils/money.js. Shares its checks and wording with expenses.
+  amount: amountInCents(),
 });
 
 // The authenticated user is always the one who paid (fromUser).

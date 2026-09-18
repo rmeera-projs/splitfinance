@@ -15,7 +15,13 @@ process.env.NODE_ENV = "test";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/splitfinance_test";
 
+// Only the network call is replaced. CATEGORIES and FALLBACK_CATEGORY are
+// plain data the expense controller builds its validation schema from at
+// load time, and they have to be the real ones: zod 4 validates z.enum()'s
+// values eagerly, so a mock that left them out made the controller throw on
+// import and took the entire integration suite down, not just one test.
 jest.mock("../../src/services/categorizationService", () => ({
+  ...jest.requireActual("../../src/services/categorizationService"),
   categorizeExpense: jest.fn().mockResolvedValue("Other"),
 }));
 

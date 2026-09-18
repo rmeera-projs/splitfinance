@@ -4,7 +4,9 @@ const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { publicUserSelect, groupUserSelect, presentUser } = require("../utils/publicUser");
 const { getUserBalances } = require("../services/balanceService");
-const { USERNAME_RE } = require("../utils/validators");
+// Namespaced rather than destructured: handlers below destructure request
+// fields called `username` and `email`, which would shadow the helpers.
+const fields = require("../utils/validators");
 const { setAuthCookie } = require("../utils/authCookie");
 
 const SALT_ROUNDS = 10;
@@ -14,15 +16,15 @@ const SALT_ROUNDS = 10;
 // silently no-op'ing (better to tell the client than pretend it worked).
 const updateProfileSchema = z
   .object({
-    name: z.string().min(1).optional(),
-    username: z.string().regex(USERNAME_RE, "Username must be 3-20 characters: letters, numbers, and underscores only").optional(),
-    email: z.string().email().optional(),
+    name: fields.requiredText("Name").optional(),
+    username: fields.username().optional(),
+    email: fields.email().optional(),
   })
-  .refine((data) => Object.keys(data).length > 0, { message: "Nothing to update" });
+  .refine((data) => Object.keys(data).length > 0, { error: "Nothing to update" });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(8),
+  currentPassword: fields.requiredText("Current password"),
+  newPassword: fields.newPassword("New password"),
 });
 
 async function getMe(req, res, next) {

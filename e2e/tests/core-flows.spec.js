@@ -1,4 +1,5 @@
 const { test, expect } = require("@playwright/test");
+const fs = require("fs");
 const { uniqueUser, signUp, createGroup, accountMenu, logOut, logIn } = require("./helpers");
 
 test("signup lands on the dashboard with the new account's name", async ({ page }) => {
@@ -280,4 +281,74 @@ test("an unconfirmed account can split expenses but not use the AI parser", asyn
   await page.getByPlaceholder(/Dinner \$60/).fill("spent 12 on lunch");
   await page.getByRole("button", { name: "Fill in form" }).click();
   await expect(page.getByText(/confirm your email address/i).last()).toBeVisible();
+});
+
+// Filtering runs entirely client-side against data the page already has, so
+// the risk isn't the arithmetic (that's covered by expenseFilters.test.js)
+// but whether the real DOM actually narrows and restores the list when a
+// person types - jsdom's text-matching quirks in the component tests are
+// exactly the kind of thing that can hide a real rendering bug.
+test("searching narrows the expense list and clearing brings it back", async ({ page }) => {
+  await signUp(page);
+  await createGroup(page, "Camping Trip");
+
+  await page.getByPlaceholder("Description").first().fill("Tent rental");
+  await page.getByPlaceholder("Amount").first().fill("40");
+  await page.getByRole("button", { name: "Add expense" }).click();
+  await expect(page.getByText("Tent rental")).toBeVisible();
+
+  await page.getByPlaceholder("Description").first().fill("Firewood");
+  await page.getByPlaceholder("Amount").first().fill("15");
+  await page.getByRole("button", { name: "Add expense" }).click();
+  await expect(page.getByText("Firewood")).toBeVisible();
+
+  await page.getByLabel("Search expenses").fill("tent");
+  await expect(page.getByText("Tent rental")).toBeVisible();
+  await expect(page.getByText("Firewood")).not.toBeVisible();
+  await expect(page.getByText(/Showing 1 of 2 expenses/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.getByText("Tent rental")).toBeVisible();
+  await expect(page.getByText("Firewood")).toBeVisible();
+});
+
+// Everything about CSV export - the CSV content, escaping, filenames - has
+// dedicated unit coverage; the one thing that can only be proven in a real
+// browser is that clicking the button actually triggers real file
+// downloads, since jsdom has no Blob-backed <a download> to observe.
+test("exporting a group downloads an expenses CSV and a settlements CSV", async ({ page, browser }) => {
+  const debtor = uniqueUser("debtor");
+  const debtorContext = await browser.newContext();
+  await signUp(await debtorContext.newPage(), debtor);
+  await debtorContext.close();
+
+  await signUp(page);
+  await createGroup(page, "Export Test Trip", [debtor.username]);
+
+  await page.getByPlaceholder("Description").first().fill("Campsite fee");
+  await page.getByPlaceholder("Amount").first().fill("60");
+  await page.getByRole("button", { name: "Add expense" }).click();
+  await expect(page.getByText("Campsite fee")).toBeVisible();
+
+  const downloads = [];
+  page.on("download", (d) => downloads.push(d));
+
+  await page.getByRole("button", { name: "Export CSV" }).click();
+  // Two separate <a download> clicks fire in sequence, not one - give both
+  // a moment to land rather than asserting immediately after the UI click.
+  await expect.poll(() => downloads.length).toBe(2);
+
+  const filenames = downloads.map((d) => d.suggestedFilename()).sort();
+  expect(filenames).toEqual(["Export-Test-Trip-expenses.csv", "Export-Test-Trip-settlements.csv"]);
+
+  const expensesDownload = downloads.find((d) => d.suggestedFilename().endsWith("-expenses.csv"));
+  const expensesPath = await expensesDownload.path();
+  const expensesCsv = fs.readFileSync(expensesPath, "utf8");
+
+  // Not full-content equality - just that the real values a person would
+  // actually check (who was there, what it cost, how it split) survived
+  // the whole round trip: the click, the Blob, the disk write, re-reading it.
+  expect(expensesCsv).toContain("Campsite fee");
+  expect(expensesCsv).toContain("60.00");
+  expect(expensesCsv).toContain("30.00"); // each member's half of the split
 });

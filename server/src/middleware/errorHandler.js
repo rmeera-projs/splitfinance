@@ -14,7 +14,10 @@ function errorHandler(err, req, res, _next) {
   // 400 here so every route validating its body/params this way gets a
   // proper client error instead of falling through to a raw 500.
   if (err instanceof ZodError) {
-    const message = err.errors.map((e) => e.message).join(", ");
+    // `.issues`, not `.errors`: zod 4 removed the `.errors` alias. Reading
+    // it made this handler throw while handling the error, so every
+    // validation failure in the API came back as a 500 instead of a 400.
+    const message = err.issues.map((e) => e.message).join(", ");
     return res.status(400).json({ error: message });
   }
 

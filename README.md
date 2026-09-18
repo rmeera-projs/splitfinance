@@ -410,13 +410,13 @@ review once the app was live on a real domain:
   ([`dependabot.yml`](.github/dependabot.yml)) opens the upgrade PRs, which
   run the full test suite before anyone merges them - monthly, with routine
   minor/patch updates grouped into one PR per project, and the major
-  versions that were reviewed and declined (React 19, Tailwind 4, zod 4,
-  eslint 10, Prisma 7, cookie 2) ignored with the reason recorded, so they
-  don't reappear with every patch release. That throttles routine churn
-  only: Dependabot *security* updates are triggered by advisories, not the
-  schedule, and the Dockerfiles
-  use `npm ci` so the tree running in production is the tree that was
-  audited.
+  versions that were reviewed and declined (React 19, Tailwind 4, eslint 10,
+  Prisma 7, cookie 2) ignored with the reason recorded, so they don't
+  reappear with every patch release. zod 4 was on that list too, until it
+  was taken deliberately (see the Roadmap below). That throttles routine
+  churn only: Dependabot *security* updates are triggered by advisories, not
+  the schedule, and the Dockerfiles use `npm ci` so the tree running in
+  production is the tree that was audited.
 
 ## 🏗️ Architecture
 
@@ -753,11 +753,6 @@ correction afterwards that may or may not land.
 ## 🗺️ Roadmap
 
 ### Next up
-- [ ] Search/filter expenses within a group (by description, category, date
-  range, or payer) - not needed with a handful of test expenses, but a real
-  gap once a group's activity feed grows past a screenful
-- [ ] CSV export of a group's expenses and settlements - useful for
-  record-keeping or reconciling outside the app
 - [ ] Ship the security logs somewhere - they're structured JSON precisely
   so that "every failed login for this address in the last hour" is a query
   rather than a parser someone has to write, but right now reading them
@@ -797,6 +792,34 @@ correction afterwards that may or may not land.
   currencies
 
 ### Shipped
+- [x] Search/filter expenses within a group - by description text, category,
+  payer, and an inclusive date range, all combined as AND. Runs entirely
+  client-side (`expenseFilters.js`) since the group page already has every
+  expense loaded; balances and insights are deliberately left unfiltered, so
+  narrowing the list can never make it look like someone owes less than they
+  do
+- [x] CSV export of a group's expenses and settlements - two files rather
+  than one (`csvExport.js`), since folding a settlement's plain two-person
+  transfer into the same rows as an expense's per-member split would mean
+  either inventing an ambiguous sign convention or leaving most cells blank.
+  The expenses file has one column per member showing their own split, so a
+  column total is "what this person was charged" without reconstructing it
+  by hand. Every field is escaped against CSV/spreadsheet formula injection -
+  a description or member name starting with `=`, `+`, `-` or `@` would
+  otherwise execute as a live formula the moment the file is opened in Excel
+  or Sheets
+- [x] Validation messages are worded for people, not zod's defaults -
+  zod 4 renamed `ZodError.errors` to `.issues`, which was silently turning
+  every validation failure into a 500 until `errorHandler.js` was updated.
+  Taking the upgrade properly meant going further: zod's own default
+  messages ("Too small: expected string to have >=8 characters") are written
+  for developers, not the people reading them, and they were reworded
+  wholesale between zod 3 and 4 - so leaving them in place meant a dependency
+  bump could silently rewrite what a user sees on a failed signup. Every
+  user-facing field now goes through `utils/validators.js`, which owns the
+  wording once and stays put across future zod upgrades; an integration test
+  drives a bad request at every validated endpoint and fails if any of
+  zod's own phrasing leaks through
 - [x] WebSocket-based real-time updates
 - [x] Natural-language expense entry - type "Dinner $60, I paid, split with
   Bob and Charlie" into a text box on the add-expense form and Cohere

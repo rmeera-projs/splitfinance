@@ -26,7 +26,7 @@
     "jsonwebtoken": "^9.0.2",
     "resend": "^6.28.0",
     "socket.io": "^4.8.3",
-    "zod": "^3.23.8"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "eslint": "^8.57.0",

@@ -5,6 +5,8 @@ import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
 import { getSocket } from "../realtime/socket";
 import { parseAmountToCents, formatCents, centsToInputValue, splitEvenly } from "../utils/money";
+import { EMPTY_FILTERS, filterExpenses, hasActiveFilters } from "../utils/expenseFilters";
+import { exportGroupCsvs } from "../utils/csvExport";
 
 // Human-readable text for the "someone else changed this group" banner -
 // deliberately generic (not "Alice added an expense") since the payload
@@ -65,6 +67,11 @@ export default function GroupPage() {
   const [settleAmount, setSettleAmount] = useState("");
   const [settleError, setSettleError] = useState("");
   const [settleSaving, setSettleSaving] = useState(false);
+
+  // Filters for the expense list only. Balances and insights deliberately
+  // ignore them: a filter that shrank "who owes whom" would show someone
+  // owing less than they really do.
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
 
   const [memberIdentifiers, setMemberIdentifiers] = useState("");
   const [memberError, setMemberError] = useState("");
@@ -433,6 +440,11 @@ export default function GroupPage() {
 
   if (!group) return null;
 
+  const visibleExpenses = filterExpenses(group.expenses, filters);
+  const filtering = hasActiveFilters(filters);
+  const visibleTotal = visibleExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const setFilter = (key) => (e) => setFilters((current) => ({ ...current, [key]: e.target.value }));
+
   return (
     <div className="max-w-2xl mx-auto p-6">
       <Link to="/" className="text-sm text-emerald-600 hover:underline">
@@ -447,12 +459,20 @@ export default function GroupPage() {
             </span>
           )}
         </h1>
-        <button
-          onClick={handleToggleFinalize}
-          className="text-sm border px-3 py-1 rounded hover:bg-gray-50"
-        >
-          {group.isFinalized ? "Reopen group" : "Finalize group"}
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={() => exportGroupCsvs(group)}
+            className="text-sm border px-3 py-1 rounded hover:bg-gray-50"
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={handleToggleFinalize}
+            className="text-sm border px-3 py-1 rounded hover:bg-gray-50"
+          >
+            {group.isFinalized ? "Reopen group" : "Finalize group"}
+          </button>
+        </div>
       </div>
 
       {activityNotice && (
@@ -695,8 +715,88 @@ export default function GroupPage() {
 
       <section>
         <h2 className="font-semibold mb-2">Activity</h2>
+
+        {group.expenses.length > 0 && (
+          <div className="bg-white border rounded p-3 mb-3 space-y-2 text-sm" role="search">
+            <input
+              className="w-full border rounded px-2 py-1"
+              placeholder="Search expenses"
+              aria-label="Search expenses"
+              value={filters.text}
+              onChange={setFilter("text")}
+            />
+            <div className="flex flex-wrap gap-2 items-center">
+              <select
+                className="border rounded px-2 py-1"
+                aria-label="Filter by category"
+                value={filters.category}
+                onChange={setFilter("category")}
+              >
+                <option value="">All categories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="border rounded px-2 py-1"
+                aria-label="Filter by payer"
+                value={filters.payerId}
+                onChange={setFilter("payerId")}
+              >
+                <option value="">Anyone paid</option>
+                {group.members.map((m) => (
+                  <option key={m.user.id} value={String(m.user.id)}>
+                    {m.user.name}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1 text-xs text-gray-600">
+                From
+                <input
+                  type="date"
+                  className="border rounded px-2 py-1 text-sm"
+                  aria-label="From date"
+                  value={filters.from}
+                  onChange={setFilter("from")}
+                />
+              </label>
+              <label className="flex items-center gap-1 text-xs text-gray-600">
+                To
+                <input
+                  type="date"
+                  className="border rounded px-2 py-1 text-sm"
+                  aria-label="To date"
+                  value={filters.to}
+                  onChange={setFilter("to")}
+                />
+              </label>
+              {filtering && (
+                <button
+                  type="button"
+                  onClick={() => setFilters(EMPTY_FILTERS)}
+                  className="text-xs text-emerald-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+            {filtering && (
+              <p className="text-xs text-gray-600" aria-live="polite">
+                Showing {visibleExpenses.length} of {group.expenses.length}{" "}
+                {group.expenses.length === 1 ? "expense" : "expenses"} · ${formatCents(visibleTotal)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {filtering && visibleExpenses.length === 0 && (
+          <p className="text-sm text-gray-500">No expenses match these filters.</p>
+        )}
+
         <ul className="space-y-2">
-          {group.expenses.map((exp) =>
+          {visibleExpenses.map((exp) =>
             editingId === exp.id ? (
               <li key={exp.id} className="bg-white border rounded p-3 text-sm">
                 <form onSubmit={(e) => handleSaveEdit(e, exp.id)} className="space-y-2">

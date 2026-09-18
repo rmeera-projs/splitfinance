@@ -4,7 +4,9 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { ApiError } = require("../middleware/errorHandler");
 const { sendPasswordResetEmail } = require("../services/emailService");
-const { USERNAME_RE } = require("../utils/validators");
+// Namespaced rather than destructured: handlers below destructure request
+// fields called `username` and `email`, which would shadow the helpers.
+const fields = require("../utils/validators");
 const { presentUser } = require("../utils/publicUser");
 const { sendVerification, hashToken: hashVerificationToken } = require("../services/emailVerificationService");
 const { setAuthCookie, clearAuthCookie } = require("../utils/authCookie");
@@ -24,27 +26,31 @@ function hashToken(rawToken) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
+// Field wording lives in utils/validators.js - see there for why.
 const signupSchema = z.object({
-  name: z.string().min(1),
-  username: z
-    .string()
-    .regex(USERNAME_RE, "Username must be 3-20 characters: letters, numbers, and underscores only"),
-  email: z.string().email(),
-  password: z.string().min(8),
+  name: fields.requiredText("Name"),
+  username: fields.username(),
+  email: fields.email(),
+  password: fields.newPassword(),
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: fields.email(),
+  password: fields.requiredText("Password"),
 });
 
 const forgotPasswordSchema = z.object({
-  email: z.string().email(),
+  email: fields.email(),
 });
 
+// A missing token means a truncated link rather than something the user
+// typed, so the message points at the link.
+const linkToken = () =>
+  z.string({ error: "This link is missing its token" }).min(1, "This link is missing its token");
+
 const resetPasswordSchema = z.object({
-  token: z.string().min(1),
-  newPassword: z.string().min(8),
+  token: linkToken(),
+  newPassword: fields.newPassword("New password"),
 });
 
 async function signup(req, res, next) {
@@ -192,7 +198,7 @@ function logout(req, res) {
   res.json({ message: "Signed out." });
 }
 
-const verifyEmailSchema = z.object({ token: z.string().min(1) });
+const verifyEmailSchema = z.object({ token: linkToken() });
 
 // Unauthenticated on purpose. The link arrives by email and is very often
 // opened somewhere other than the browser holding the session - a phone,

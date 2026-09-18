@@ -6,6 +6,16 @@ import GroupPage from "./GroupPage";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { __mockSocket } from "../realtime/socket";
+import { exportGroupCsvs } from "../utils/csvExport";
+
+// The download mechanics (Blob/URL.createObjectURL/an <a download> click)
+// are exercised by the e2e suite, which can observe a real browser download
+// event - jsdom has no such thing. What belongs here is narrower and
+// cheaper to check: that the button calls exportGroupCsvs with this page's
+// actual group data.
+vi.mock("../utils/csvExport", () => ({
+  exportGroupCsvs: vi.fn(),
+}));
 
 vi.mock("../api/client", () => ({
   default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -50,6 +60,11 @@ function baseGroup(overrides = {}) {
     members: [{ user: ME }, { user: OTHER }],
     balances: [],
     expenses: [],
+    // The real API (groupController's getGroup) always includes this,
+    // even for a group with none - defaulted here for the same reason
+    // expenses/balances are, so Export CSV has real settlement data to
+    // read rather than undefined.
+    settlements: [],
     ...overrides,
   };
 }
@@ -80,10 +95,21 @@ function mockGroupResponse(response) {
 function activitySection() {
   return within(screen.getByText("Activity").closest("section"));
 }
+// Just the expense list. The Activity section also holds the filter bar,
+// whose category and payer dropdowns repeat names that appear on expenses.
+function expenseList() {
+  return within(screen.getByText("Activity").closest("section").querySelector("ul"));
+}
 // "You"/member names also appear in the "Paid by" select options - scope to
 // the Members section to avoid ambiguous matches.
 function membersSection() {
   return within(screen.getByText("Members").closest("section"));
+}
+// The Insights panel's "By member" breakdown can coincidentally show the
+// same dollar figure as a balance (e.g. a member's total spend equalling
+// what they owe) - scope balance assertions here to avoid that collision.
+function balancesSection() {
+  return within(screen.getByText("Balances").closest("section"));
 }
 // Invokes whatever handler GroupPage registered for "group-activity", as if
 // the server had just emitted it over the (mocked) socket.
@@ -124,7 +150,7 @@ describe("GroupPage - rendering", () => {
     expect(screen.getByText(/owes/)).toBeInTheDocument();
     // "$" and the amount render as separate text nodes, so match loosely.
     expect(screen.getByText(/10\.00/)).toBeInTheDocument();
-    expect(activitySection().getByText("Food & Drink")).toBeInTheDocument();
+    expect(expenseList().getByText("Food & Drink")).toBeInTheDocument();
   });
 
   test("shows a settled-up message when there are no balances", async () => {
@@ -828,5 +854,134 @@ describe("GroupPage - manual category override", () => {
     await screen.findByText(/Arcade tokens/);
 
     expect(screen.getByTitle("Change category")).toBeInTheDocument();
+  });
+});
+
+describe("GroupPage - filtering expenses", () => {
+  const noon = (d) => new Date(2026, 8, d, 12).toISOString();
+  const EXPENSES = [
+    { id: 11, description: "Lift passes", amount: 12000, category: "Entertainment", date: noon(1), payer: ME, splits: [] },
+    { id: 12, description: "Chalet groceries", amount: 4500, category: "Groceries", date: noon(3), payer: OTHER, splits: [] },
+    { id: 13, description: "Apres-ski drinks", amount: 3000, category: "Food & Drink", date: noon(5), payer: OTHER, splits: [] },
+  ];
+
+  async function renderWithExpenses(extra = {}) {
+    mockGroupResponse({ data: baseGroup({ expenses: EXPENSES, ...extra }) });
+    renderGroupPage();
+    // Descriptions render as bare text nodes next to the category <select>
+    // (see the Activity list markup), so no single element's full text
+    // equals just the description - wait on the filter bar instead, which
+    // only appears once expenses have loaded.
+    await screen.findByLabelText("Search expenses");
+    return userEvent.setup();
+  }
+
+  // Same reasoning as above: check each <li>'s full text rather than
+  // looking for an element whose text is exactly the description.
+  const shown = () => {
+    const items = expenseList().queryAllByRole("listitem");
+    return ["Lift passes", "Chalet groceries", "Apres-ski drinks"].filter((d) =>
+      items.some((li) => li.textContent.includes(d))
+    );
+  };
+
+  test("has no filter bar until there is something to filter", async () => {
+    mockGroupResponse({ data: baseGroup() });
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    expect(screen.queryByLabelText("Search expenses")).not.toBeInTheDocument();
+  });
+
+  test("narrows the list by description and reports what is shown", async () => {
+    const user = await renderWithExpenses();
+
+    await user.type(screen.getByLabelText("Search expenses"), "SKI");
+
+    expect(shown()).toEqual(["Apres-ski drinks"]);
+    expect(screen.getByText(/Showing 1 of 3 expenses · \$30\.00/)).toBeInTheDocument();
+  });
+
+  test("filters by payer and by category", async () => {
+    const user = await renderWithExpenses();
+
+    await user.selectOptions(screen.getByLabelText("Filter by payer"), String(OTHER.id));
+    expect(shown()).toEqual(["Chalet groceries", "Apres-ski drinks"]);
+
+    await user.selectOptions(screen.getByLabelText("Filter by category"), "Groceries");
+    expect(shown()).toEqual(["Chalet groceries"]);
+  });
+
+  test("filters by an inclusive date range", async () => {
+    const user = await renderWithExpenses();
+
+    await user.type(screen.getByLabelText("From date"), "2026-09-03");
+    await user.type(screen.getByLabelText("To date"), "2026-09-05");
+
+    expect(shown()).toEqual(["Chalet groceries", "Apres-ski drinks"]);
+  });
+
+  test("says so when nothing matches, and clearing brings everything back", async () => {
+    const user = await renderWithExpenses();
+
+    await user.type(screen.getByLabelText("Search expenses"), "helicopter");
+    expect(screen.getByText(/no expenses match these filters/i)).toBeInTheDocument();
+    expect(shown()).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(shown()).toEqual(["Lift passes", "Chalet groceries", "Apres-ski drinks"]);
+    expect(screen.getByLabelText("Search expenses")).toHaveValue("");
+  });
+
+  // A filter must never make someone look like they owe less than they do.
+  test("leaves balances untouched while filtering", async () => {
+    const user = await renderWithExpenses({ balances: [{ from: OTHER.id, to: ME.id, amount: 7500 }] });
+
+    await user.type(screen.getByLabelText("Search expenses"), "helicopter");
+
+    expect(balancesSection().getByText(/owes/)).toBeInTheDocument();
+    expect(balancesSection().getByText(/75\.00/)).toBeInTheDocument();
+  });
+});
+
+describe("GroupPage - exporting CSVs", () => {
+  test("Export CSV passes the page's own group data straight through", async () => {
+    const user = userEvent.setup();
+    const groupData = baseGroup({
+      expenses: [
+        {
+          id: 21,
+          description: "Cabin rental",
+          amount: 30000,
+          category: "Housing & Utilities",
+          date: "2026-09-01T12:00:00.000Z",
+          payer: ME,
+          splits: [{ userId: ME.id, amountOwed: 15000 }, { userId: OTHER.id, amountOwed: 15000 }],
+        },
+      ],
+      settlements: [{ id: 1, fromUser: OTHER.id, toUser: ME.id, amount: 5000, date: "2026-09-02T12:00:00.000Z" }],
+    });
+    mockGroupResponse({ data: groupData });
+
+    renderGroupPage();
+    await user.click(await screen.findByRole("button", { name: "Export CSV" }));
+
+    // Not a deep-equal on the whole payload - the point is that GroupPage
+    // is a thin pass-through with no export-specific logic of its own to
+    // get wrong, so identity (or at least the fields csvExport reads) is
+    // what matters, not GroupPage re-deriving anything.
+    expect(exportGroupCsvs).toHaveBeenCalledTimes(1);
+    const passed = exportGroupCsvs.mock.calls[0][0];
+    expect(passed.name).toBe(groupData.name);
+    expect(passed.expenses).toBe(groupData.expenses);
+    expect(passed.settlements).toBe(groupData.settlements);
+    expect(passed.members).toBe(groupData.members);
+  });
+
+  test("the button is available even when there is nothing to export yet", async () => {
+    mockGroupResponse({ data: baseGroup() });
+    renderGroupPage();
+
+    expect(await screen.findByRole("button", { name: "Export CSV" })).toBeEnabled();
   });
 });

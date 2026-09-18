@@ -7,53 +7,54 @@ const { assertGroupMembers } = require("../utils/assertGroupMembers");
 const { categorizeExpense, FALLBACK_CATEGORY, CATEGORIES } = require("../services/categorizationService");
 const { parseExpenseText } = require("../services/expenseParsingService");
 const { emitGroupActivity } = require("../services/realtimeService");
+const { id, requiredText, amountInCents } = require("../utils/validators");
 
 // Every amount on the wire is integer cents, never dollars - $10.23 is
 // 1023 (see src/utils/money.js). Rejecting non-integers at the schema is
 // what lets the sum check below be exact equality instead of a tolerance.
-//
-// The ceiling is the INTEGER column's own limit ($21,474,836.47); without
-// it an oversized amount would reach Postgres and come back as an
-// out-of-range 500 rather than a clean 400.
-const MAX_AMOUNT_CENTS = 2147483647;
-
-const amountInCents = z
-  .number()
-  .int("Amounts must be given in whole cents")
-  .positive()
-  .max(MAX_AMOUNT_CENTS, "Amount is too large");
+// amountInCents also caps at the INTEGER column's own limit
+// ($21,474,836.47); without that an oversized amount would reach Postgres
+// and come back as an out-of-range 500 rather than a clean 400. Field
+// wording lives in utils/validators.js.
 
 const splitSchema = z.object({
-  userId: z.number(),
-  amountOwed: amountInCents,
+  userId: id("Split member"),
+  amountOwed: amountInCents(),
 });
 
+const expenseDate = () => z.iso.datetime({ error: "Date must be a valid date and time" }).optional();
+
+const splits = () =>
+  z
+    .array(splitSchema, { error: "Splits must be a list" })
+    .min(1, "An expense must be split between at least one person");
+
 const createExpenseSchema = z.object({
-  groupId: z.number(),
-  paidBy: z.number(),
-  amount: amountInCents,
-  description: z.string().min(1),
-  date: z.string().datetime().optional(),
-  splits: z.array(splitSchema).min(1),
+  groupId: id("Group"),
+  paidBy: id("Payer"),
+  amount: amountInCents(),
+  description: requiredText("Description"),
+  date: expenseDate(),
+  splits: splits(),
 });
 
 // Same shape as create, minus groupId - an expense can't be moved between
 // groups, only edited in place.
 const updateExpenseSchema = z.object({
-  paidBy: z.number(),
-  amount: amountInCents,
-  description: z.string().min(1),
-  date: z.string().datetime().optional(),
-  splits: z.array(splitSchema).min(1),
+  paidBy: id("Payer"),
+  amount: amountInCents(),
+  description: requiredText("Description"),
+  date: expenseDate(),
+  splits: splits(),
 });
 
 const updateCategorySchema = z.object({
-  category: z.enum(CATEGORIES),
+  category: z.enum(CATEGORIES, { error: "Choose one of the listed categories" }),
 });
 
 const parseExpenseSchema = z.object({
-  groupId: z.number(),
-  text: z.string().min(1),
+  groupId: id("Group"),
+  text: requiredText("Expense text"),
 });
 
 async function createExpense(req, res, next) {

@@ -5,16 +5,24 @@ const { getGroupBalances } = require("../services/balanceService");
 const { groupUserSelect } = require("../utils/publicUser");
 const { assertGroupNotFinalized } = require("../utils/assertGroupNotFinalized");
 const { emitGroupActivity } = require("../services/realtimeService");
+const { requiredText } = require("../utils/validators");
 
 // Each entry can be either an email or a username - resolveUsers() below
 // looks a member up by whichever one it looks like.
+const memberIdentifier = () => requiredText("Each email or username");
+
 const createGroupSchema = z.object({
-  name: z.string().min(1),
-  memberIdentifiers: z.array(z.string().min(1)).optional().default([]),
+  name: requiredText("Group name"),
+  memberIdentifiers: z
+    .array(memberIdentifier(), { error: "Members must be a list of emails or usernames" })
+    .optional()
+    .default([]),
 });
 
 const addMembersSchema = z.object({
-  memberIdentifiers: z.array(z.string().min(1)).min(1),
+  memberIdentifiers: z
+    .array(memberIdentifier(), { error: "Members must be a list of emails or usernames" })
+    .min(1, "Add at least one email or username"),
 });
 
 // Matches each identifier against either email or username in one query,
@@ -30,7 +38,7 @@ async function resolveUsers(identifiers) {
 }
 
 const setFinalizedSchema = z.object({
-  finalized: z.boolean(),
+  finalized: z.boolean({ error: "finalized must be true or false" }),
 });
 
 async function createGroup(req, res, next) {

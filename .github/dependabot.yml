@@ -55,11 +55,6 @@ updates:
       # backend as a whole.
       - dependency-name: cookie
         update-types: [version-update:semver-major]
-      # zod 4 renames ZodError.errors to .issues, which turns every
-      # validation 400 into a 500 via middleware/errorHandler.js. Worth
-      # doing, but as a code change rather than a version bump.
-      - dependency-name: zod
-        update-types: [version-update:semver-major]
       # eslint 10 drops eslintrc support. Migrating to flat config is a
       # deliberate task covering both server and client together.
       - dependency-name: eslint
