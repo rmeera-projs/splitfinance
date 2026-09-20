@@ -1,8 +1,8 @@
 # SplitFinance - A Splitwise-Style Expense Sharing App
 
 A full-stack expense-splitting app: track shared expenses across a group,
-let an AI categorise and parse them, and settle up in as few payments as
-the math allows.
+let an AI categorise, parse and read them (typed or photographed), ask it
+about your balances, and settle up in as few payments as the math allows.
 
 🔗 **Live at [splitfinance.org](https://splitfinance.org)** · API health check: [api.splitfinance.org](https://api.splitfinance.org/health)
 
@@ -43,7 +43,8 @@ flowchart LR
         A --> DB
     end
 
-    A --> CO["Cohere Chat API<br/>categorisation · NL parsing"]
+    A --> CO["Cohere<br/>categorisation · NL parsing<br/>receipt vision · assistant"]
+    A -->|security logs| CW["CloudWatch Logs"]
     A --> RE["Resend<br/>password-reset email"]
     SSM["SSM Parameter Store<br/>secrets fetched at boot"] -.-> EC2
     GH["GitHub Actions<br/>test · lint · deploy via OIDC"] -.-> EC2
@@ -81,6 +82,13 @@ Everything below is the detail — [Features](#-features) first, then the
 - **Natural-Language Expense Entry** — type something like "Dinner $60, I
   paid, split with Bob and Charlie" and Cohere parses it into the
   add-expense form's fields for you to review before submitting
+- **Receipt Scanning** — photograph a receipt and a Cohere vision model reads
+  the merchant, total and line items; a splitter then lets you tick who had
+  each item, with tax and tip spread in proportion to what each person
+  ordered, and fills the add-expense form for you to review
+- **Balances & Spending Assistant** — ask "who do I owe the most?" or "how
+  much did I spend on food this month?" in a chat box on the dashboard; a
+  tool-calling agent answers from your own balances and spending, read-only
 - **Balances** — real-time "who owes whom" view per group, plus a
   dashboard rollup of what you owe and are owed by each person across all
   your groups, netted across groups with a per-group breakdown linking to
@@ -98,6 +106,11 @@ Everything below is the detail — [Features](#-features) first, then the
   per-group breakdowns, both per-group and personally across all your groups;
   every current member appears in the per-member breakdown, even at $0 if
   they haven't been part of an expense yet
+- **Search & Filter** — narrow a group's expenses by description text,
+  category, payer and date range; balances and insights stay unfiltered so a
+  filter can never make someone look like they owe less
+- **CSV Export** — download a group's expenses (one column per member) and
+  settlements as spreadsheet-safe CSV files
 - **Activity Feed** — chronological log of expenses and settlements per group
 - **Live Updates** — a WebSocket notice tells you when someone else changes a
   group you're viewing (new/edited/deleted expense, settlement, finalize/
@@ -186,6 +199,58 @@ turns into structured fields:
   outright (with a `code: "EMAIL_NOT_VERIFIED"` the client keys its
   "resend confirmation" prompt off). Adding an expense by hand is
   unaffected. See Security
+
+### Receipt Scanning
+
+A "scan a receipt photo" link on the add-expense form uploads an image to
+`POST /api/expenses/receipt`, where
+[`receiptService.js`](server/src/services/receiptService.js) sends it to a
+Cohere vision model and gets back the merchant, the total and the line items:
+
+- **Never creates the expense** - it pre-fills the form (and opens the
+  per-item splitter), so a misread is something you correct before
+  submitting, never a wrong charge
+- **The upload path is deliberately narrow** - the first binary input in the
+  app: memory storage with a 5MB cap, the file type decided from its leading
+  bytes (JPEG/PNG/WebP) rather than its name, and the image is **never
+  written to disk or the database**. A receipt can carry a card's last digits
+  and a name, and the output is a few fields, so keeping it would only create
+  something to leak
+- **Line items are best-effort** - unusable ones (zero, negative,
+  non-numeric, or costing more than the whole bill) are dropped and the count
+  capped; a receipt with unreadable lines still yields a usable total
+- **The per-item splitter is exact to the cent** -
+  [`receiptSplit.js`](client/src/utils/receiptSplit.js) splits each item among
+  the people who had it, then spreads the rest (tax, tip, service charge, or a
+  net discount) in proportion to what each person ordered. The rest is
+  derived as "printed total minus items" rather than read off a scanned tax
+  line, so the result reconciles to the total even when a line was missed, and
+  leftover cents go by the largest-remainder method (BigInt for the products,
+  which overflow a double at the largest amounts)
+- Same gate as the other AI features: a confirmed email address and the
+  shared rate limits, run before the upload is buffered. Without a key the
+  route answers 503 and entering the expense by hand is unaffected
+
+### Balances & Spending Assistant
+
+A chat box on the dashboard, backed by `POST /api/assistant/ask` and
+[`assistantService.js`](server/src/services/assistantService.js) - a genuine
+tool-calling agent (Cohere's v2 chat API) rather than a single completion:
+
+- The model chooses among four read-only tools - `get_my_balances`,
+  `list_my_groups`, `get_group_balances`, `get_my_spending` - each a thin
+  wrapper over an existing, already-tested service, so the answers can't
+  disagree with the balances and insights pages
+- **No tool takes a user id.** Each closes over the authenticated caller, so
+  there is no argument a prompt-injection payload sitting in an expense
+  description could use to ask for someone else's data. The one unavoidable
+  parameter, `groupId`, is checked against membership before any query runs
+- Dollar figures are formatted to strings before the model sees them, and it
+  is told to quote them verbatim rather than doing arithmetic
+- The tool loop is capped at four rounds, the client resends the visible
+  transcript (plain role/content pairs, length-capped; tool-call internals are
+  never trusted from the client), and a tighter per-user limiter sits on top
+  of the shared AI limits because one request can drive several model calls
 
 ## 📊 Spending Insights
 
@@ -397,8 +462,9 @@ review once the app was live on a real domain:
   resetting with it.
 - **The AI features require a confirmed email address** - signing up is
   free and instant, which makes throwaway accounts the cheapest route to
-  this project's metered Cohere quota. `POST /api/expenses/parse` is gated
-  on `users.email_verified_at`
+  this project's metered Cohere quota. `POST /api/expenses/parse`, `POST
+  /api/expenses/receipt` and `POST /api/assistant/ask` are gated on
+  `users.email_verified_at`
   ([`requireVerifiedEmail.js`](server/src/middleware/requireVerifiedEmail.js)),
   and creating or editing an expense still works but skips its
   auto-categorization. The scope is deliberate: an unconfirmed account can
@@ -408,6 +474,15 @@ review once the app was live on a real domain:
   a problem that does not exist there. The confirmation token is 32 random
   bytes stored only as a SHA-256 hash, single-use, and asking for a fresh
   link spends the outstanding one.
+- **The assistant can only ever see the caller's own data** - its tools take
+  no user id (each closes over the authenticated session), every group id is
+  membership-checked before a query runs, and every tool is read-only, so a
+  prompt-injection payload in an expense description has nothing to aim at.
+  See Balances & Spending Assistant, above
+- **Receipt uploads are narrow and never persisted** - a size cap, the file
+  type decided from its bytes rather than its name, and no copy kept anywhere,
+  because a receipt photo can carry card digits and a name. See Receipt
+  Scanning, above
 - **Dependencies are audited on a schedule, not just when someone
   remembers** - [`security.yml`](.github/workflows/security.yml) runs
   `npm audit` on every change *and* weekly, since "no new commits" is not
@@ -439,8 +514,8 @@ splitfinance/
 ```
 
 ### API Surface
-25 REST endpoints across 7 resources (auth, users, groups, expenses,
-settlements, insights, admin) - see `server/src/routes/`.
+27 REST endpoints across 8 resources (auth, users, groups, expenses,
+settlements, insights, admin, assistant) - see `server/src/routes/`.
 
 ### Tech Stack
 | Layer | Choice |
@@ -451,9 +526,9 @@ settlements, insights, admin) - see `server/src/routes/`.
 | Auth | JWT in an HttpOnly, SameSite=Lax cookie; bcrypt |
 | Email | Resend (password reset links) |
 | Real-time | Socket.IO (live group activity notices) |
-| AI | Cohere Chat API (expense auto-categorization, natural-language expense entry) |
+| AI | Cohere (expense auto-categorization, natural-language entry, receipt vision, tool-calling assistant) |
 | Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
-| Infra | Docker Compose, Caddy (reverse proxy + automatic HTTPS) |
+| Infra | Docker Compose, Caddy (reverse proxy + automatic HTTPS), CloudWatch Logs (security events) |
 | CI/CD | GitHub Actions (lint, unit, integration and Playwright on every PR; auto-deploy to AWS via SSM when a merge touches the app) |
 
 ## 🚀 Getting Started
@@ -489,15 +564,16 @@ npm run dev
 Backend runs on `http://localhost:5000`, frontend on `http://localhost:5173`.
 
 #### Cohere API key (optional)
-Auto-categorization and natural-language expense entry both need a
-[Cohere](https://cohere.com) API key. Add it to `server/.env`:
+Auto-categorization, natural-language expense entry, receipt scanning and the
+balances assistant all need a [Cohere](https://cohere.com) API key. Add it to `server/.env`:
 ```
 COHERE_API_KEY="your-key-here"
 ```
 This is optional — without it, every expense is categorized as `"Other"`
-and natural-language entry falls back to a much cruder regex-only parse
-(see [expenseParsingService.js](server/src/services/expenseParsingService.js)),
-but everything else works normally. No key is needed to run the test
+natural-language entry falls back to a much cruder regex-only parse (see
+[expenseParsingService.js](server/src/services/expenseParsingService.js)),
+receipt scanning and the assistant are simply unavailable (a 503), but
+everything else works normally. No key is needed to run the test
 suite; the Cohere client is fully mocked in tests.
 
 #### Resend API key (optional)
@@ -649,21 +725,21 @@ incident.
 
 ## 🧪 Testing
 
-442 tests across three layers, deliberately rather than incidentally: a
+610 tests across three layers, deliberately rather than incidentally: a
 fast mocked layer for logic, a real-database layer for everything mocks
 structurally can't prove, and a browser layer for the flows a user actually
 performs.
 
 | Layer | Count | What's real | What's mocked |
 |---|---|---|---|
-| Unit | 376 (232 backend, 144 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
-| Integration | 53 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
-| End-to-end | 13 | everything — real browser, real API, real database | nothing |
+| Unit | 523 (302 backend, 221 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
+| Integration | 70 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
+| End-to-end | 17 | everything — real browser, real API, real database | nothing |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 232 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 144 (Vitest + React Testing Library)
+cd server && npm test        # 302 (Jest + Supertest, Prisma mocked)
+cd client && npm test        # 221 (Vitest + React Testing Library)
 ```
 
 **Integration** (`server/tests/integration/`) runs the real app against a
@@ -685,15 +761,16 @@ npm run test:integration     # defaults to that same splitfinance_test database
 ```
 
 **End-to-end** (`e2e/`) drives the real UI in Chromium via Playwright —
-signup, login, creating a group, splitting an expense, settling up, and the
-admin page's access control. It runs against its own disposable stack
+signup, login, creating a group, splitting an expense, settling up, search
+and CSV export (a real file download), and the access control on the admin
+page and the AI features. It runs against its own disposable stack
 (`docker-compose.e2e.yml`: separate database, separate ports) so it never
 touches local development data.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p splitfinance-e2e up -d --build
 cd e2e && npm install && npx playwright install chromium
-npm test                     # 13 flows
+npm test                     # 17 flows
 npm run screenshots          # regenerates the README images from the live app
 ```
 
