@@ -26,7 +26,9 @@ const PROMPT =
   '- "merchant" is the store or restaurant name as printed, null if unreadable\n' +
   '- "total" is the final amount charged including tax and tip, as a plain number with no currency ' +
   "symbol - NOT the subtotal. null if you cannot read it.\n" +
-  "- Never guess. If the image is not a receipt, return null for both.";
+  "- The photo may be rotated, tilted, creased or taken at an angle - read it as best you can in " +
+  "whatever orientation it appears, but never guess a number you cannot actually see.\n" +
+  "- If the image is not a receipt, return null for both.";
 
 function getClient() {
   if (!process.env.COHERE_API_KEY) return null;
@@ -91,7 +93,9 @@ async function extractReceipt(imageBuffer, mimeType, options = {}) {
           role: "user",
           content: [
             { type: "text", text: PROMPT },
-            { type: "image_url", imageUrl: { url: dataUri } },
+            // "high" rather than the default "auto": a tilted or crumpled receipt is
+            // where small print gets lost when the image is downscaled.
+            { type: "image_url", imageUrl: { url: dataUri, detail: "high" } },
           ],
         },
       ],

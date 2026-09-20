@@ -23,7 +23,7 @@ describe("extractReceipt", () => {
     const content = client.chat.mock.calls[0][0].messages[0].content;
     expect(content[1]).toEqual({
       type: "image_url",
-      imageUrl: { url: `data:image/png;base64,${IMAGE.toString("base64")}` },
+      imageUrl: { url: `data:image/png;base64,${IMAGE.toString("base64")}`, detail: "high" },
     });
   });
 
