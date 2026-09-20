@@ -180,12 +180,18 @@ services:
     # the group already exists by the time this container starts (the
     # instance depends_on it), so the driver only ever needs to create
     # streams within it, which is all its IAM policy grants.
+    #
+    # No awslogs-stream option either - that's deliberate, not an omission.
+    # "awslogs-stream-prefix" is an ECS task-definition concept; the plain
+    # Docker Engine awslogs log driver has no such option; it rejects it
+    # outright as an unknown log opt. Leaving awslogs-stream unset falls
+    # back to the driver's own default (the container ID), which is unique
+    # per boot/redeploy without this file having to invent a naming scheme.
     logging:
       driver: awslogs
       options:
         awslogs-region: "${aws_region}"
         awslogs-group: "/splitfinance/server"
-        awslogs-stream-prefix: server
   client:
     build:
       context: ./client
