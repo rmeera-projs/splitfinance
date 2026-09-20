@@ -45,6 +45,8 @@ export default function GroupPage() {
   const [nlText, setNlText] = useState("");
   const [nlLoading, setNlLoading] = useState(false);
   const [nlError, setNlError] = useState("");
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
 
   // Fixed category list from the server (see categorizationService),
   // used to populate the manual-override dropdown on each expense.
@@ -231,6 +233,31 @@ export default function GroupPage() {
       setNlError(err.response?.data?.error || "Couldn't understand that - try rephrasing, or fill in the form below");
     } finally {
       setNlLoading(false);
+    }
+  }
+
+  // Pre-fills the same fields as the sentence parser above, from a photo of a
+  // receipt. Like it, never submits anything - the user reviews the result.
+  // The server never stores the image (see receiptService.js).
+  async function handleReceiptSelected(e) {
+    const file = e.target.files?.[0];
+    // Cleared so picking the same file again after a failure still fires.
+    e.target.value = "";
+    if (!file) return;
+
+    setReceiptError("");
+    setReceiptLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("receipt", file);
+      const { data } = await api.post("/expenses/receipt", formData);
+
+      if (data.merchant) setDescription(data.merchant);
+      setAmount(centsToInputValue(data.total));
+    } catch (err) {
+      setReceiptError(err.response?.data?.error || "Couldn't read that receipt - try again, or fill in the form below");
+    } finally {
+      setReceiptLoading(false);
     }
   }
 
@@ -632,6 +659,19 @@ export default function GroupPage() {
               </button>
             </div>
             {nlError && <p className="text-sm text-red-600">{nlError}</p>}
+
+            <label className="inline-block text-sm text-emerald-800 cursor-pointer hover:underline">
+              {receiptLoading ? "Reading receipt…" : "Or scan a receipt photo"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                aria-label="Scan a receipt"
+                disabled={receiptLoading}
+                onChange={handleReceiptSelected}
+              />
+            </label>
+            {receiptError && <p className="text-sm text-red-600">{receiptError}</p>}
           </div>
 
           <div className="flex gap-2">

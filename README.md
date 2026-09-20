@@ -771,12 +771,12 @@ Nothing queued right now - see Later below.
   than just listing raw balances; would also give the "Email notifications"
   item below actual content worth sending instead of a plain transactional
   email
-- [ ] Receipt OCR with multi-step line-item splitting - beyond just
-  extracting a total, have a vision-capable model read individual line
-  items off a photographed receipt and propose a per-item split ("shared
-  appetizer split three ways, entrees individually?") for you to confirm or
-  edit - extract → interpret → propose → confirm, a genuinely agentic flow
-  rather than one completion
+- [ ] Receipt OCR, stage two: per-item splitting - stage one reads only the
+  total; the next step is reading each line item and proposing who had what
+  ("shared appetizer three ways, entrees individually?") for you to confirm,
+  with tax and tip spread in proportion to each person's share of the
+  subtotal rather than evenly. Deliberately held until stage one shows
+  extraction is reliable enough to be worth building that interface on
 - [ ] Duplicate-expense detection - flag a newly-added expense that looks
   like an accidental double-entry of a recent one (similar description,
   amount, and date)
@@ -792,6 +792,17 @@ Nothing queued right now - see Later below.
   currencies
 
 ### Shipped
+- [x] Receipt scanning, stage one - a "scan a receipt photo" control on the
+  add-expense form uploads a JPEG/PNG/WebP, a Cohere vision model reads the
+  merchant and total, and the form is pre-filled for you to check (it never
+  submits on its own). The first binary input in the app, so the upload path
+  is deliberately narrow: memory storage with a 5MB cap, the file type
+  decided from its leading bytes rather than its name or declared type, and
+  the image is never written to disk or the database - a receipt can carry a
+  card's last digits and a name, and the feature's whole output is two
+  fields, so keeping it would only create something to leak. Gated like the
+  other AI features (confirmed email, rate limits, limiters run before the
+  upload is buffered)
 - [x] A conversational balances/insights assistant - ask "how much did I
   spend on food this month?" or "who do I owe the most?" in a chat box on
   the dashboard. A genuine tool-calling agent (`assistantService.js`, the

@@ -246,6 +246,59 @@ describe("GroupPage - adding an expense", () => {
   });
 });
 
+describe("GroupPage - scanning a receipt", () => {
+  const photo = () => new File(["fake"], "receipt.jpg", { type: "image/jpeg" });
+
+  test("uploads the photo and pre-fills the form without submitting an expense", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockImplementation((url) => {
+      if (url === "/expenses/receipt") return Promise.resolve({ data: { merchant: "Olive Garden", total: 6050 } });
+      return Promise.resolve({ data: {} });
+    });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    await user.upload(screen.getByLabelText("Scan a receipt"), photo());
+
+    expect(await screen.findByDisplayValue("Olive Garden")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Amount")).toHaveValue(60.5);
+
+    const [url, body] = api.post.mock.calls.find(([u]) => u === "/expenses/receipt");
+    expect(url).toBe("/expenses/receipt");
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.get("receipt").name).toBe("receipt.jpg");
+    expect(api.post).not.toHaveBeenCalledWith("/expenses", expect.anything());
+  });
+
+  test("still fills the amount when the merchant is unreadable", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockResolvedValue({ data: { merchant: null, total: 1200 } });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+    await user.upload(screen.getByLabelText("Scan a receipt"), photo());
+
+    await waitFor(() => expect(screen.getByPlaceholderText("Amount")).toHaveValue(12));
+    expect(screen.getByPlaceholderText("Description")).toHaveValue("");
+  });
+
+  test("shows the server's message and leaves the form alone when the receipt can't be read", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockRejectedValue({ response: { data: { error: "Couldn't read a total from that image" } } });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+    await user.upload(screen.getByLabelText("Scan a receipt"), photo());
+
+    expect(await screen.findByText(/couldn't read a total/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Amount")).toHaveValue(null);
+  });
+});
+
 describe("GroupPage - natural-language expense entry", () => {
   test("fills in the form from a parsed sentence, without submitting an expense", async () => {
     const user = userEvent.setup();

@@ -301,6 +301,24 @@ test("the assistant chat gates on a confirmed email, just like the AI parser", a
   await expect(page.getByText(/confirm your email address/i).last()).toBeVisible();
 });
 
+// The receipt scanner is gated exactly like the other AI features. Only the
+// refusal is reachable end to end (no Cohere key in this stack, and no way to
+// confirm an email), but it proves the multipart upload leaves a real browser,
+// clears CORS and the session cookie, and that the page shows the server's
+// reason. The extraction itself is covered by receiptService.test.js.
+test("an unconfirmed account can't scan a receipt, and is told why", async ({ page }) => {
+  await signUp(page);
+  await createGroup(page, "Receipt Group");
+
+  await page.getByLabel("Scan a receipt").setInputFiles({
+    name: "receipt.jpg",
+    mimeType: "image/jpeg",
+    buffer: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)]),
+  });
+
+  await expect(page.getByText(/confirm your email address/i).last()).toBeVisible();
+});
+
 // Filtering runs entirely client-side against data the page already has, so
 // the risk isn't the arithmetic (that's covered by expenseFilters.test.js)
 // but whether the real DOM actually narrows and restores the list when a

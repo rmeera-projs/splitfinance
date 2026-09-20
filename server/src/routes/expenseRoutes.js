@@ -2,6 +2,7 @@ const express = require("express");
 const { requireAuth } = require("../middleware/auth");
 const { aiRateLimit } = require("../middleware/rateLimit");
 const { requireVerifiedEmail } = require("../middleware/requireVerifiedEmail");
+const { receiveUpload, scanReceipt } = require("../controllers/receiptController");
 const {
   createExpense,
   updateExpense,
@@ -22,6 +23,9 @@ router.get("/categories", listCategories);
 // expenses below stay open to unverified accounts and simply skip their
 // auto-categorization instead (see expenseController).
 router.post("/parse", requireVerifiedEmail, aiRateLimit, parseExpense);
+// Limiters run before the upload is buffered, so a throttled caller costs no
+// memory. Same gate as /parse: the image goes to a metered model.
+router.post("/receipt", requireVerifiedEmail, aiRateLimit, receiveUpload, scanReceipt);
 router.post("/", aiRateLimit, createExpense);
 router.patch("/:id", aiRateLimit, updateExpense);
 router.patch("/:id/category", updateExpenseCategory);
