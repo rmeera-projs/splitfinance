@@ -27,6 +27,11 @@ output "instance_id" {
   value = aws_instance.app.id
 }
 
+output "security_log_tail_command" {
+  description = "Live-tail the server's structured security events (server/src/services/securityLog.js) from CloudWatch."
+  value       = "aws logs tail ${aws_cloudwatch_log_group.server_security.name} --region ${var.aws_region} --follow"
+}
+
 # Needed once, right after a `terraform apply -target=random_password.
 # postgres_password ...`: retrieve via `terraform output -raw
 # postgres_password` and set it on the live database with `ALTER USER`

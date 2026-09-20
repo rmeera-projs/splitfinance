@@ -168,6 +168,24 @@ services:
       CLIENT_URL: "https://${domain_name}"
       JWT_SECRET: "$JWT_SECRET_VALUE"
       DATABASE_URL: "postgresql://postgres:$POSTGRES_PASSWORD_VALUE@db:5432/splitfinance?schema=public"
+    # Replaces the base compose file's default json-file logging with the
+    # Docker awslogs driver, so this container's stdout/stderr (the
+    # structured JSON lines from server/src/services/securityLog.js, plus
+    # everything else it logs) reaches the CloudWatch log group
+    # terraform/main.tf's aws_cloudwatch_log_group.server_security creates,
+    # instead of only ever being readable via `docker compose logs server`
+    # on this one instance. The driver authenticates via this instance's own
+    # IAM role (aws_iam_role_policy.ec2_cloudwatch_logs) - no credentials
+    # here. awslogs-create-group is deliberately left unset (default false):
+    # the group already exists by the time this container starts (the
+    # instance depends_on it), so the driver only ever needs to create
+    # streams within it, which is all its IAM policy grants.
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: "${aws_region}"
+        awslogs-group: "/splitfinance/server"
+        awslogs-stream-prefix: server
   client:
     build:
       context: ./client

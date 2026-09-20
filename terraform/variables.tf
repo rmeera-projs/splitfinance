@@ -90,3 +90,9 @@ variable "repo_branch" {
   type        = string
   default     = "main"
 }
+
+variable "security_log_retention_days" {
+  description = "How long CloudWatch keeps the server's structured security log events. AWS bills per GB stored regardless of the value; this just bounds it."
+  type        = number
+  default     = 90
+}

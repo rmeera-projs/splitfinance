@@ -753,10 +753,7 @@ correction afterwards that may or may not land.
 ## 🗺️ Roadmap
 
 ### Next up
-- [ ] Ship the security logs somewhere - they're structured JSON precisely
-  so that "every failed login for this address in the last hour" is a query
-  rather than a parser someone has to write, but right now reading them
-  still means `docker compose logs` on the instance
+Nothing queued right now - see Later below.
 
 ### Later
 - [ ] A conversational balances/insights assistant - ask "how much did I
@@ -792,6 +789,16 @@ correction afterwards that may or may not land.
   currencies
 
 ### Shipped
+- [x] Security logs ship to CloudWatch - the structured JSON events from
+  `securityLog.js` already went to the server container's stdout/stderr;
+  now the Docker `awslogs` logging driver forwards that same output to a
+  dedicated CloudWatch log group (`terraform/main.tf`'s
+  `aws_cloudwatch_log_group.server_security`), authenticated via the
+  instance's own IAM role rather than any embedded credential. "Every
+  failed login for this address in the last hour" is now a query
+  (`aws logs tail /splitfinance/server --follow`, or CloudWatch Logs
+  Insights) instead of an SSH session and `docker compose logs`, and the
+  events outlive instance replacement instead of vanishing with it
 - [x] Search/filter expenses within a group - by description text, category,
   payer, and an inclusive date range, all combined as AND. Runs entirely
   client-side (`expenseFilters.js`) since the group page already has every

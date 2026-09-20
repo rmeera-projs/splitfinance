@@ -225,6 +225,47 @@ resource "aws_iam_instance_profile" "ec2_ssm" {
   role = aws_iam_role.ec2_ssm.name
 }
 
+# server/src/services/securityLog.js already writes one JSON object per
+# line to stdout/stderr; today that only goes as far as `docker compose
+# logs server` on the instance itself, which means nobody sees an attack in
+# progress unless they happen to SSH in during it. This group is where the
+# Docker awslogs driver (docker-compose.override.yml, written by
+# user_data.sh.tpl below) ships that same output instead, so it survives
+# instance replacement and is queryable/alertable from CloudWatch. Created
+# by Terraform rather than left for the driver's own awslogs-create-group
+# option so retention is enforced from the first line ever written, not
+# whatever CloudWatch's no-expiry default is.
+resource "aws_cloudwatch_log_group" "server_security" {
+  name              = "/splitfinance/server"
+  retention_in_days = var.security_log_retention_days
+  tags              = { Name = "splitfinance-server-security-log" }
+}
+
+# Deliberately narrower than AmazonSSMManagedInstanceCore above: PutLogEvents
+# is a standing permission the instance holds every second it runs, so it is
+# scoped to exactly this one log group's ARN (and its log streams, the
+# ":*" suffix) rather than every log group in the account. No CreateLogGroup
+# here on purpose - the group already exists via the resource above, so the
+# awslogs driver only ever needs to create streams within it.
+resource "aws_iam_role_policy" "ec2_cloudwatch_logs" {
+  name = "splitfinance-ec2-cloudwatch-logs"
+  role = aws_iam_role.ec2_ssm.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+        Resource = [
+          aws_cloudwatch_log_group.server_security.arn,
+          "${aws_cloudwatch_log_group.server_security.arn}:*",
+        ]
+      },
+    ]
+  })
+}
+
 # Allocated standalone (not instance-associated yet) so its address is known
 # before the instance exists - the instance's own boot script needs to bake
 # this address into CLIENT_URL/VITE_API_URL, which would otherwise be a
@@ -306,7 +347,7 @@ resource "aws_instance" "app" {
   # so the ordering has to be spelled out explicitly. Without this, the
   # instance could boot and start fetching before the parameters (or the
   # IAM policy granting it permission to read them) exist yet.
-  depends_on = [aws_ssm_parameter.secrets, aws_iam_role_policy.ec2_ssm_parameters]
+  depends_on = [aws_ssm_parameter.secrets, aws_iam_role_policy.ec2_ssm_parameters, aws_iam_role_policy.ec2_cloudwatch_logs]
 
   tags = { Name = "splitfinance-app" }
 }
