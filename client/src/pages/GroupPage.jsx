@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
+import ReceiptItemSplitter from "../components/ReceiptItemSplitter";
 import { getSocket } from "../realtime/socket";
 import { parseAmountToCents, formatCents, centsToInputValue, splitEvenly } from "../utils/money";
 import { EMPTY_FILTERS, filterExpenses, hasActiveFilters } from "../utils/expenseFilters";
@@ -47,6 +48,9 @@ export default function GroupPage() {
   const [nlError, setNlError] = useState("");
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
+  // The last scan that read individual line items, while the per-item
+  // splitter is open. Null once applied, cancelled, or the expense is added.
+  const [scannedReceipt, setScannedReceipt] = useState(null);
 
   // Fixed category list from the server (see categorizationService),
   // used to populate the manual-override dropdown on each expense.
@@ -254,11 +258,30 @@ export default function GroupPage() {
 
       if (data.merchant) setDescription(data.merchant);
       setAmount(centsToInputValue(data.total));
+      // Line items are best-effort - a receipt that only yielded a total
+      // just pre-fills the form as before, with no splitter to open.
+      setScannedReceipt(data.items?.length > 0 ? data : null);
     } catch (err) {
+      setScannedReceipt(null);
       setReceiptError(err.response?.data?.error || "Couldn't read that receipt - try again, or fill in the form below");
     } finally {
       setReceiptLoading(false);
     }
+  }
+
+  // Hands the per-item result to the ordinary form as an exact split, so the
+  // person reviews (and can still adjust) it there and presses Add expense
+  // themselves. Only people who owe something are ticked, since an exact
+  // split ignores zero amounts anyway.
+  function handleApplyReceiptSplit({ shares, total, merchant }) {
+    if (merchant) setDescription(merchant);
+    setAmount(centsToInputValue(total));
+    setSplitType("exact");
+
+    const owing = Object.entries(shares).filter(([, cents]) => cents > 0);
+    setSplitMembers(owing.map(([userId]) => Number(userId)));
+    setSplitValues(Object.fromEntries(owing.map(([userId, cents]) => [userId, centsToInputValue(cents)])));
+    setScannedReceipt(null);
   }
 
   async function handleAddExpense(e) {
@@ -292,6 +315,7 @@ export default function GroupPage() {
       setAmount("");
       setSplitValues({});
       setSplitMembers(null);
+      setScannedReceipt(null);
       fetchGroup();
     } catch (err) {
       setExpenseError(err.response?.data?.error || "Failed to add expense");
@@ -672,6 +696,18 @@ export default function GroupPage() {
               />
             </label>
             {receiptError && <p className="text-sm text-red-600">{receiptError}</p>}
+            {scannedReceipt && (
+              <ReceiptItemSplitter
+                // A fresh scan must start a fresh assignment, not inherit the
+                // previous receipt's ticks.
+                key={JSON.stringify(scannedReceipt.items)}
+                receipt={scannedReceipt}
+                members={group.members.map((m) => m.user)}
+                currentUserId={user.id}
+                onApply={handleApplyReceiptSplit}
+                onCancel={() => setScannedReceipt(null)}
+              />
+            )}
           </div>
 
           <div className="flex gap-2">

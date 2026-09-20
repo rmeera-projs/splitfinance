@@ -299,6 +299,90 @@ describe("GroupPage - scanning a receipt", () => {
   });
 });
 
+describe("GroupPage - splitting a scanned receipt by item", () => {
+  const photo = () => new File(["fake"], "receipt.jpg", { type: "image/jpeg" });
+  // $40 steak + $10 salad on a $60 receipt: $10 of tax and tip.
+  const scan = {
+    merchant: "Bistro",
+    total: 6000,
+    items: [
+      { description: "Steak", amount: 4000 },
+      { description: "Salad", amount: 1000 },
+    ],
+  };
+
+  async function scanReceipt(user, data = scan) {
+    mockGroupResponse({ data: baseGroup() });
+    api.post.mockImplementation((url) => {
+      if (url === "/expenses/receipt") return Promise.resolve({ data });
+      return Promise.resolve({ data: {} });
+    });
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+    await user.upload(screen.getByLabelText("Scan a receipt"), photo());
+  }
+
+  test("opens the splitter when the scan read line items", async () => {
+    const user = userEvent.setup();
+    await scanReceipt(user);
+
+    expect(await screen.findByTestId("receipt-splitter")).toBeInTheDocument();
+    expect(screen.getByLabelText("Steak - Bob")).toBeInTheDocument();
+  });
+
+  test("does not open it when only a total was read", async () => {
+    const user = userEvent.setup();
+    await scanReceipt(user, { merchant: "Cafe", total: 1200, items: [] });
+
+    await waitFor(() => expect(screen.getByPlaceholderText("Amount")).toHaveValue(12));
+    expect(screen.queryByTestId("receipt-splitter")).not.toBeInTheDocument();
+  });
+
+  test("applying the split fills the form as an exact split, and submits exactly those amounts", async () => {
+    const user = userEvent.setup();
+    await scanReceipt(user);
+    await screen.findByTestId("receipt-splitter");
+
+    // Alice has the steak, Bob the salad.
+    await user.click(screen.getByLabelText("Steak - Bob"));
+    await user.click(screen.getByLabelText("Salad - You"));
+    await user.click(screen.getByRole("button", { name: "Use this split" }));
+
+    // The splitter closes and the ordinary form carries the result.
+    expect(screen.queryByTestId("receipt-splitter")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Amount")).toHaveValue(60);
+    expect(screen.getByPlaceholderText("Description")).toHaveValue("Bistro");
+    // Applying only fills the form - it must not create the expense itself.
+    expect(api.post).not.toHaveBeenCalledWith("/expenses", expect.anything());
+
+    await user.click(screen.getByRole("button", { name: "Add expense" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/expenses", {
+        groupId: 7,
+        paidBy: ME.id,
+        amount: 6000,
+        description: "Bistro",
+        splits: [
+          { userId: ME.id, amountOwed: 4800 },
+          { userId: OTHER.id, amountOwed: 1200 },
+        ],
+      })
+    );
+  });
+
+  test("cancelling closes the splitter and leaves the scanned total in the form", async () => {
+    const user = userEvent.setup();
+    await scanReceipt(user);
+    await screen.findByTestId("receipt-splitter");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByTestId("receipt-splitter")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Amount")).toHaveValue(60);
+  });
+});
+
 describe("GroupPage - natural-language expense entry", () => {
   test("fills in the form from a parsed sentence, without submitting an expense", async () => {
     const user = userEvent.setup();

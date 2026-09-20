@@ -37,6 +37,15 @@ describe("POST /api/expenses/receipt", () => {
     expect(extractReceipt).toHaveBeenCalledWith(expect.any(Buffer), "image/jpeg");
   });
 
+  test("passes the extracted line items through to the client", async () => {
+    const scan = { merchant: "Bistro", total: 6000, items: [{ description: "Steak", amount: 4000 }] };
+    extractReceipt.mockResolvedValue(scan);
+
+    const res = await upload(JPEG);
+
+    expect(res.body).toEqual(scan);
+  });
+
   test("trusts the bytes, not the filename or declared type", async () => {
     const res = await upload(Buffer.from("<html>not an image, however it is named</html>"), "receipt.jpg");
 

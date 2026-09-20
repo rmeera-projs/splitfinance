@@ -771,12 +771,6 @@ Nothing queued right now - see Later below.
   than just listing raw balances; would also give the "Email notifications"
   item below actual content worth sending instead of a plain transactional
   email
-- [ ] Receipt OCR, stage two: per-item splitting - stage one reads only the
-  total; the next step is reading each line item and proposing who had what
-  ("shared appetizer three ways, entrees individually?") for you to confirm,
-  with tax and tip spread in proportion to each person's share of the
-  subtotal rather than evenly. Deliberately held until stage one shows
-  extraction is reliable enough to be worth building that interface on
 - [ ] Duplicate-expense detection - flag a newly-added expense that looks
   like an accidental double-entry of a recent one (similar description,
   amount, and date)
@@ -792,6 +786,21 @@ Nothing queued right now - see Later below.
   currencies
 
 ### Shipped
+- [x] Receipt scanning, stage two: splitting by item - when a scan reads the
+  individual lines, a splitter opens showing each item with a checkbox per
+  person (everyone ticked by default, since "shared" is right more often than
+  a guess) and what each person would owe. Shared items split evenly; tax,
+  tip and service charge are spread in proportion to what each person
+  ordered rather than evenly, so the person with the steak carries more of
+  the tip than the person with the salad. The arithmetic
+  (`receiptSplit.js`) is exact to the cent: it derives the extras as
+  "printed total minus items" rather than trusting a scanned tax line, so
+  the result reconciles to the receipt total even when the scan missed a
+  line, and uses the largest-remainder method (with BigInt for the
+  intermediate products, which overflow a double at the largest amounts) to
+  hand out leftover cents. Applying it fills the ordinary form as an exact
+  split for you to review - it never submits by itself. Line items are
+  best-effort: a receipt that only yields a total behaves as in stage one
 - [x] Receipt scanning, stage one - a "scan a receipt photo" control on the
   add-expense form uploads a JPEG/PNG/WebP, a Cohere vision model reads the
   merchant and total, and the form is pre-filled for you to check (it never
