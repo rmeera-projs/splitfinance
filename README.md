@@ -385,7 +385,16 @@ review once the app was live on a real domain:
   are keyed the other way. Where a rate limiter already exists, the warning
   fires deliberately below it - by the time a limiter trips, the request
   that was the useful signal has already been discarded. Field names that
-  look like credentials are redacted no matter what a caller passes.
+  look like credentials are redacted no matter what a caller passes. In
+  production these lines ship straight to a CloudWatch log group
+  (`aws_cloudwatch_log_group.server_security` in
+  [`terraform/main.tf`](terraform/main.tf), via the Docker `awslogs`
+  logging driver configured in `terraform/user_data.sh.tpl`), authenticated
+  through the instance's own IAM role rather than any embedded credential -
+  `aws logs tail /splitfinance/server --follow` is the live equivalent of
+  the SSH-in-and-`docker compose logs` that used to be the only way to read
+  them, and the history now survives instance replacement instead of
+  resetting with it.
 - **The AI features require a confirmed email address** - signing up is
   free and instant, which makes throwaway accounts the cheapest route to
   this project's metered Cohere quota. `POST /api/expenses/parse` is gated
