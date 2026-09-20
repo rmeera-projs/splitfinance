@@ -31,7 +31,10 @@ const { CATEGORIES } = require("./categorizationService");
 // in a group is a different risk class than one that can only answer
 // questions, and settling up stays a deliberate button press.
 
-const MODEL = "command-a-03-2026";
+// command-r7b (used by categorizationService/expenseParsingService) has no
+// documented tool-use support - command-a-03-2025 is the model the
+// cohere-ai SDK's own reference docs use for v2 chat/tool-calling examples.
+const MODEL = "command-a-03-2025";
 
 // Multi-turn tool use is several Cohere calls for one user question. This
 // bounds the worst case (a model that keeps calling tools instead of
