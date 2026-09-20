@@ -29,6 +29,10 @@ jest.mock("../../src/services/expenseParsingService", () => ({
   parseExpenseText: jest.fn(),
 }));
 
+jest.mock("../../src/services/assistantService", () => ({
+  askAssistant: jest.fn(),
+}));
+
 jest.mock("../../src/services/emailService", () => ({
   sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
   sendVerificationEmail: jest.fn().mockResolvedValue(true),

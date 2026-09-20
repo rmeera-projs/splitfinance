@@ -283,6 +283,24 @@ test("an unconfirmed account can split expenses but not use the AI parser", asyn
   await expect(page.getByText(/confirm your email address/i).last()).toBeVisible();
 });
 
+// Same gate as the AI parser above, exercised through the balances/spending
+// chat box on the dashboard instead - proves the real route (requireAuth +
+// requireVerifiedEmail + the assistant rate limiter, see
+// assistantRoutes.js) is actually mounted and reachable from the browser,
+// and that the component displays the server's exact refusal rather than a
+// generic failure. The e2e stack has no Cohere key configured (see
+// docker-compose.e2e.yml/.yml), so this is also as far as any e2e run can
+// exercise this feature - a real answer from the assistant is only ever
+// checked by assistantService.test.js's mocked-model unit tests.
+test("the assistant chat gates on a confirmed email, just like the AI parser", async ({ page }) => {
+  await signUp(page);
+
+  await page.getByLabel("Ask the assistant").fill("who do I owe?");
+  await page.getByRole("button", { name: "Ask" }).click();
+
+  await expect(page.getByText(/confirm your email address/i).last()).toBeVisible();
+});
+
 // Filtering runs entirely client-side against data the page already has, so
 // the risk isn't the arithmetic (that's covered by expenseFilters.test.js)
 // but whether the real DOM actually narrows and restores the list when a

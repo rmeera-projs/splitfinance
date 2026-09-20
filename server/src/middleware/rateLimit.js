@@ -98,4 +98,24 @@ function logAiUsage(req, res, next) {
 
 const aiRateLimit = [aiRateLimitPerIp, aiRateLimitPerUser, aiRateLimitDaily, logAiUsage];
 
-module.exports = { authRateLimit, aiRateLimit };
+// The assistant (assistantService.js) sits behind aiRateLimit like the
+// other Cohere-calling routes, plus this one extra per-user limiter on top.
+// It exists because one HTTP request here can drive several Cohere calls
+// (the tool-calling loop, capped at MAX_TOOL_ROUNDS) rather than exactly
+// one - aiRateLimitPerUser's count of *requests* understates the actual
+// Cohere load a chatty user can generate, so this counts conversations at a
+// tighter window instead.
+const assistantRateLimitPerUser = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.userId),
+  skip: () => process.env.NODE_ENV === "test",
+  message: { error: "Too many assistant questions - please try again later." },
+  handler: limitHandler("assistant-per-user"),
+});
+
+const assistantRateLimit = [...aiRateLimit, assistantRateLimitPerUser];
+
+module.exports = { authRateLimit, aiRateLimit, assistantRateLimit };

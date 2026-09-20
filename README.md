@@ -765,12 +765,6 @@ correction afterwards that may or may not land.
 Nothing queued right now - see Later below.
 
 ### Later
-- [ ] A conversational balances/insights assistant - ask "how much did I
-  spend on food this month?" or "who do I owe the most right now?" in a
-  chat box on the dashboard; a genuine tool-calling agent rather than a
-  single completion, since it needs to decide which existing service
-  (`getGroupBalances`, the insights aggregation utils, expense history) to
-  query based on the question
 - [ ] Smart settle-up nudges - reuse `simplifyDebts.js`'s output to
   proactively suggest who should settle up next, phrased in plain language
   ("Alice and Bob settling up clears 2 of the 3 outstanding debts") rather
@@ -798,6 +792,21 @@ Nothing queued right now - see Later below.
   currencies
 
 ### Shipped
+- [x] A conversational balances/insights assistant - ask "how much did I
+  spend on food this month?" or "who do I owe the most?" in a chat box on
+  the dashboard. A genuine tool-calling agent (`assistantService.js`, the
+  first user of Cohere's v2 chat API in this codebase) rather than a single
+  completion, so the model decides which existing, already-tested service
+  (`getUserBalances`, `getGroupBalances`, the spending aggregation) answers
+  the question rather than being asked to compute anything itself - dollar
+  figures are formatted to strings before the model ever sees them, and it's
+  told to quote them verbatim rather than doing its own arithmetic. Every
+  tool is read-only and none of them take a userId parameter; each closes
+  over the authenticated caller's own id instead, so there's no argument a
+  prompt-injection payload sitting in an expense description could use to
+  ask for someone else's data - a groupId parameter is unavoidable, so
+  every tool that takes one checks membership before running the query, the
+  same boundary the rest of the app enforces at the route level
 - [x] Security logs ship to CloudWatch - the structured JSON events from
   `securityLog.js` already went to the server container's stdout/stderr;
   now the Docker `awslogs` logging driver forwards that same output to a

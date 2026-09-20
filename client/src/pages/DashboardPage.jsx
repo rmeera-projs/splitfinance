@@ -4,6 +4,7 @@ import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import InsightsPanel from "../components/InsightsPanel";
 import BalancesPanel from "../components/BalancesPanel";
+import AssistantChat from "../components/AssistantChat";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -78,6 +79,11 @@ export default function DashboardPage() {
       <section className="mb-8">
         <h2 className="font-semibold mb-2">Your Spending</h2>
         <InsightsPanel items={insightItems} dimensionLabel="Group" dimension={(item) => item.groupName} />
+      </section>
+
+      <section className="mb-8">
+        <h2 className="font-semibold mb-2">Ask about your balances</h2>
+        <AssistantChat />
       </section>
 
       <form onSubmit={handleCreateGroup} className="mb-6 space-y-2">
