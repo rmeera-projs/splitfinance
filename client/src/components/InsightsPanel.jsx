@@ -46,7 +46,12 @@ const GRANULARITIES = ["day", "week", "month"];
  *   member's name), so someone with no expenses yet still shows up instead
  *   of silently missing from the chart
  */
-export default function InsightsPanel({ items, dimensionLabel, dimension, dimensionValues }) {
+// `stacked` keeps the three breakdowns in one column instead of side by
+// side. Needed because the three-column rule below is a *viewport* media
+// query, so in a narrow sidebar on a wide screen it would still try for
+// three columns and crush the Over Time toggle - the panel has no way to
+// know how much room its container actually gives it, so the caller says.
+export default function InsightsPanel({ items, dimensionLabel, dimension, dimensionValues, stacked = false }) {
   const [granularity, setGranularity] = useState("month");
 
   // Only bail out entirely when there's truly nothing to show - if
@@ -61,7 +66,7 @@ export default function InsightsPanel({ items, dimensionLabel, dimension, dimens
   const byTime = aggregateByTime(items, granularity);
 
   return (
-    <div className="grid gap-6 sm:grid-cols-3">
+    <div className={`grid gap-6 ${stacked ? "" : "sm:grid-cols-3"}`}>
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">By Category</h3>
         <BarList data={byCategory} />

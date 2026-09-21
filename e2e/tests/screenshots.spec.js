@@ -79,7 +79,13 @@ test("capture dashboard and group views", async ({ page, browser }) => {
   await expect(page.getByText("October internet")).toBeVisible();
 
   await page.goto("/");
-  await expect(page.getByRole("link", { name: /Barcelona Trip/ })).toBeVisible();
-  await page.setViewportSize({ width: 1280, height: 680 });
+  // .first(): the balances panel links to the group as well as the group
+  // card below it, so an unqualified match is ambiguous once a balance has
+  // loaded - and racy before it has.
+  await expect(page.getByRole("link", { name: /Barcelona Trip/ }).first()).toBeVisible();
+  // Tall enough for the whole dashboard now that it is two columns - a
+  // viewport shot rather than fullPage, so this height is what decides
+  // whether the last group card is cut in half.
+  await page.setViewportSize({ width: 1280, height: 760 });
   await page.screenshot({ path: path.join(OUT_DIR, "dashboard.png") });
 });

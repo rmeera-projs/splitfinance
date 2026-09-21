@@ -497,11 +497,13 @@ export default function GroupPage() {
   const setFilter = (key) => (e) => setFilters((current) => ({ ...current, [key]: e.target.value }));
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto p-6">
       <Link to="/" className="text-sm text-emerald-600 hover:underline">
         &larr; Back to groups
       </Link>
-      <div className="flex items-center justify-between mt-2 mb-6">
+      {/* Stacked on a phone: side by side, the buttons squeeze a longer group
+          name into a two-line sliver. */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-2 mb-6">
         <h1 className="text-2xl font-bold">
           {group.name}
           {group.isFinalized && (
@@ -541,463 +543,480 @@ export default function GroupPage() {
         </div>
       )}
 
-      <section className="mb-8">
-        <h2 className="font-semibold mb-2">Balances</h2>
-        {group.balances.length === 0 && (
-          <p className="text-sm text-gray-500">Everyone is settled up 🎉</p>
-        )}
-        <ul className="space-y-1">
-          {group.balances.map((b) => (
-            <li key={balanceKey(b)} className="text-sm bg-white border rounded p-2">
-              <div className="flex items-center justify-between gap-2">
-                <span>
-                  <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
-                  <span className="font-medium">{nameFor(b.to)}</span> ${formatCents(b.amount)}
-                </span>
-                {b.from === user.id && settlingKey !== balanceKey(b) && (
+      {/* Two columns once there is room for them: the things you do (add an
+          expense, read the feed) take the width, and the things you check
+          (who owes whom, spending, who is here) sit alongside instead of
+          pushing the feed down the page. Below `lg` it collapses back to a
+          single column. */}
+      <div className="lg:grid lg:grid-cols-3 lg:gap-8 lg:items-start">
+        {/* First in the DOM so a phone stacks balances above the form and the
+            feed - the answer you opened the group for, before the work. On a
+            wide screen `lg:order-2` moves it to the right-hand column. The
+            max-height keeps a long member list from pinning open past the
+            bottom of the screen. */}
+        <aside className="lg:order-2 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
+          <section className="mb-8">
+            <h2 className="font-semibold mb-2">Balances</h2>
+            {group.balances.length === 0 && (
+              <p className="text-sm text-gray-500">Everyone is settled up 🎉</p>
+            )}
+            <ul className="space-y-1">
+              {group.balances.map((b) => (
+                <li key={balanceKey(b)} className="text-sm bg-white border rounded p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>
+                      <span className="font-medium">{nameFor(b.from)}</span> owes{" "}
+                      <span className="font-medium">{nameFor(b.to)}</span> ${formatCents(b.amount)}
+                    </span>
+                    {b.from === user.id && settlingKey !== balanceKey(b) && (
+                      <button
+                        onClick={() => openSettle(b)}
+                        className="text-xs text-emerald-600 hover:underline shrink-0"
+                      >
+                        Settle up
+                      </button>
+                    )}
+                  </div>
+
+                  {settlingKey === balanceKey(b) && (
+                    <form onSubmit={(e) => handleSettleUp(e, b)} className="mt-2 space-y-2">
+                      <label className="block text-xs text-gray-600" htmlFor={`settle-${balanceKey(b)}`}>
+                        How much did you pay {nameFor(b.to)}? Less than ${formatCents(b.amount)} records a partial
+                        payment.
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-gray-500">$</span>
+                        <input
+                          id={`settle-${balanceKey(b)}`}
+                          className="w-28 border rounded px-2 py-1"
+                          inputMode="decimal"
+                          aria-label="Settlement amount"
+                          value={settleAmount}
+                          onChange={(e) => setSettleAmount(e.target.value)}
+                          autoFocus
+                        />
+                        <button
+                          type="submit"
+                          disabled={settleSaving}
+                          className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded font-medium hover:bg-emerald-700 disabled:opacity-60"
+                        >
+                          {settleSaving ? "Recording..." : "Record payment"}
+                        </button>
+                        <button type="button" onClick={closeSettle} className="text-xs text-gray-500 hover:underline">
+                          Cancel
+                        </button>
+                      </div>
+                      {settleError && <p className="text-xs text-red-600">{settleError}</p>}
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="mb-8">
+            <h2 className="font-semibold mb-2">Insights</h2>
+            <InsightsPanel
+              items={group.expenses.map((exp) => ({
+                amount: exp.amount,
+                category: exp.category,
+                date: exp.date,
+                payer: exp.payer.name,
+              }))}
+              dimensionLabel="Member"
+              dimension={(item) => item.payer}
+              dimensionValues={group.members.map((m) => m.user.name)}
+              stacked
+            />
+          </section>
+
+          <section className="mb-8">
+            <h2 className="font-semibold mb-2">Members</h2>
+            <ul className="flex flex-wrap gap-2 mb-3">
+              {group.members.map((m) => (
+                <li
+                  key={m.user.id}
+                  className="text-sm bg-white border rounded-full px-3 py-1"
+                >
+                  <span>{m.user.id === user.id ? "You" : m.user.name}</span>
+                  <span className="text-gray-400"> @{m.user.username}</span>
+                </li>
+              ))}
+            </ul>
+            {group.isFinalized ? (
+              <p className="text-sm text-gray-500">
+                This group is finalized. Reopen it to add members.
+              </p>
+            ) : (
+              <form onSubmit={handleAddMembers} className="flex gap-2">
+                <input
+                  className="flex-1 border rounded px-3 py-2 text-sm"
+                  placeholder="Add by email or username, comma separated (must already have an account)"
+                  value={memberIdentifiers}
+                  onChange={(e) => setMemberIdentifiers(e.target.value)}
+                />
+                <button className="text-sm border px-3 py-2 rounded hover:bg-gray-50">
+                  Add
+                </button>
+              </form>
+            )}
+            {memberError && <p className="text-sm text-red-600 mt-2">{memberError}</p>}
+          </section>
+        </aside>
+
+        <div className="lg:order-1 lg:col-span-2">
+          <section className="mb-8">
+            <h2 className="font-semibold mb-2">Add expense</h2>
+            {group.isFinalized ? (
+              <p className="text-sm text-gray-500">
+                This group is finalized. Reopen it to add expenses.
+              </p>
+            ) : (
+            <form onSubmit={handleAddExpense} className="space-y-3">
+              <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-2">
+                <label className="block text-sm font-medium text-emerald-900">
+                  Describe it in plain English
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 border rounded px-3 py-2"
+                    placeholder='e.g. "Dinner $60, I paid, split with Bob and Charlie"'
+                    value={nlText}
+                    onChange={(e) => setNlText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleParseExpense();
+                      }
+                    }}
+                  />
                   <button
-                    onClick={() => openSettle(b)}
-                    className="text-xs text-emerald-600 hover:underline shrink-0"
+                    type="button"
+                    onClick={handleParseExpense}
+                    disabled={nlLoading || !nlText.trim()}
+                    className="bg-emerald-600 text-white px-4 rounded font-medium hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap"
                   >
-                    Settle up
+                    {nlLoading ? "Thinking…" : "Fill in form"}
                   </button>
+                </div>
+                {nlError && <p className="text-sm text-red-600">{nlError}</p>}
+
+                <label className="inline-block text-sm text-emerald-800 cursor-pointer hover:underline">
+                  {receiptLoading ? "Reading receipt…" : "Or scan a receipt photo"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    aria-label="Scan a receipt"
+                    disabled={receiptLoading}
+                    onChange={handleReceiptSelected}
+                  />
+                </label>
+                {receiptError && <p className="text-sm text-red-600">{receiptError}</p>}
+                {scannedReceipt && (
+                  <ReceiptItemSplitter
+                    // A fresh scan must start a fresh assignment, not inherit the
+                    // previous receipt's ticks.
+                    key={JSON.stringify(scannedReceipt.items)}
+                    receipt={scannedReceipt}
+                    members={group.members.map((m) => m.user)}
+                    currentUserId={user.id}
+                    onApply={handleApplyReceiptSplit}
+                    onCancel={() => setScannedReceipt(null)}
+                  />
                 )}
               </div>
 
-              {settlingKey === balanceKey(b) && (
-                <form onSubmit={(e) => handleSettleUp(e, b)} className="mt-2 space-y-2">
-                  <label className="block text-xs text-gray-600" htmlFor={`settle-${balanceKey(b)}`}>
-                    How much did you pay {nameFor(b.to)}? Less than ${formatCents(b.amount)} records a partial
-                    payment.
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-gray-500">$</span>
-                    <input
-                      id={`settle-${balanceKey(b)}`}
-                      className="w-28 border rounded px-2 py-1"
-                      inputMode="decimal"
-                      aria-label="Settlement amount"
-                      value={settleAmount}
-                      onChange={(e) => setSettleAmount(e.target.value)}
-                      autoFocus
-                    />
-                    <button
-                      type="submit"
-                      disabled={settleSaving}
-                      className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded font-medium hover:bg-emerald-700 disabled:opacity-60"
-                    >
-                      {settleSaving ? "Recording..." : "Record payment"}
-                    </button>
-                    <button type="button" onClick={closeSettle} className="text-xs text-gray-500 hover:underline">
-                      Cancel
-                    </button>
-                  </div>
-                  {settleError && <p className="text-xs text-red-600">{settleError}</p>}
-                </form>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="mb-8">
-        <h2 className="font-semibold mb-2">Members</h2>
-        <ul className="flex flex-wrap gap-2 mb-3">
-          {group.members.map((m) => (
-            <li
-              key={m.user.id}
-              className="text-sm bg-white border rounded-full px-3 py-1"
-            >
-              <span>{m.user.id === user.id ? "You" : m.user.name}</span>
-              <span className="text-gray-400"> @{m.user.username}</span>
-            </li>
-          ))}
-        </ul>
-        {group.isFinalized ? (
-          <p className="text-sm text-gray-500">
-            This group is finalized. Reopen it to add members.
-          </p>
-        ) : (
-          <form onSubmit={handleAddMembers} className="flex gap-2">
-            <input
-              className="flex-1 border rounded px-3 py-2 text-sm"
-              placeholder="Add by email or username, comma separated (must already have an account)"
-              value={memberIdentifiers}
-              onChange={(e) => setMemberIdentifiers(e.target.value)}
-            />
-            <button className="text-sm border px-3 py-2 rounded hover:bg-gray-50">
-              Add
-            </button>
-          </form>
-        )}
-        {memberError && <p className="text-sm text-red-600 mt-2">{memberError}</p>}
-      </section>
-
-      <section className="mb-8">
-        <h2 className="font-semibold mb-2">Insights</h2>
-        <InsightsPanel
-          items={group.expenses.map((exp) => ({
-            amount: exp.amount,
-            category: exp.category,
-            date: exp.date,
-            payer: exp.payer.name,
-          }))}
-          dimensionLabel="Member"
-          dimension={(item) => item.payer}
-          dimensionValues={group.members.map((m) => m.user.name)}
-        />
-      </section>
-
-      <section className="mb-8">
-        <h2 className="font-semibold mb-2">Add expense</h2>
-        {group.isFinalized ? (
-          <p className="text-sm text-gray-500">
-            This group is finalized. Reopen it to add expenses.
-          </p>
-        ) : (
-        <form onSubmit={handleAddExpense} className="space-y-3">
-          <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-2">
-            <label className="block text-sm font-medium text-emerald-900">
-              Describe it in plain English
-            </label>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 border rounded px-3 py-2"
-                placeholder='e.g. "Dinner $60, I paid, split with Bob and Charlie"'
-                value={nlText}
-                onChange={(e) => setNlText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleParseExpense();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleParseExpense}
-                disabled={nlLoading || !nlText.trim()}
-                className="bg-emerald-600 text-white px-4 rounded font-medium hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {nlLoading ? "Thinking…" : "Fill in form"}
-              </button>
-            </div>
-            {nlError && <p className="text-sm text-red-600">{nlError}</p>}
-
-            <label className="inline-block text-sm text-emerald-800 cursor-pointer hover:underline">
-              {receiptLoading ? "Reading receipt…" : "Or scan a receipt photo"}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="sr-only"
-                aria-label="Scan a receipt"
-                disabled={receiptLoading}
-                onChange={handleReceiptSelected}
-              />
-            </label>
-            {receiptError && <p className="text-sm text-red-600">{receiptError}</p>}
-            {scannedReceipt && (
-              <ReceiptItemSplitter
-                // A fresh scan must start a fresh assignment, not inherit the
-                // previous receipt's ticks.
-                key={JSON.stringify(scannedReceipt.items)}
-                receipt={scannedReceipt}
-                members={group.members.map((m) => m.user)}
-                currentUserId={user.id}
-                onApply={handleApplyReceiptSplit}
-                onCancel={() => setScannedReceipt(null)}
-              />
-            )}
-          </div>
-
-          <div className="flex gap-2">
-            <input
-              className="flex-1 border rounded px-3 py-2"
-              placeholder="Description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            <input
-              className="w-28 border rounded px-3 py-2"
-              type="number"
-              step="0.01"
-              placeholder="Amount"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </div>
-
-          <div className="flex gap-2 items-center text-sm">
-            <label className="text-gray-600">Paid by</label>
-            <select
-              aria-label="Paid by"
-              className="border rounded px-2 py-1"
-              value={paidBy}
-              onChange={(e) => setPaidBy(Number(e.target.value))}
-            >
-              {group.members.map((m) => (
-                <option key={m.user.id} value={m.user.id}>
-                  {m.user.id === user.id ? "You" : m.user.name}
-                </option>
-              ))}
-            </select>
-
-            <label className="text-gray-600 ml-4">Split</label>
-            <select
-              className="border rounded px-2 py-1"
-              value={splitType}
-              onChange={(e) => setSplitType(e.target.value)}
-            >
-              <option value="equal">Equally</option>
-              <option value="exact">By exact amount</option>
-              <option value="percentage">By percentage</option>
-            </select>
-          </div>
-
-          <div className="space-y-1 bg-white border rounded p-3">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Split between</p>
-            {group.members.map((m) => {
-              const checked = splitMembers === null || splitMembers.includes(m.user.id);
-              return (
-                <label key={m.user.id} className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={checked} onChange={() => toggleSplitMember(m.user.id)} />
-                  <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
-                  {splitType !== "equal" && checked && (
-                    <>
-                      <input
-                        className="w-24 border rounded px-2 py-1"
-                        type="number"
-                        step="0.01"
-                        placeholder={splitType === "exact" ? "$" : "%"}
-                        value={splitValues[m.user.id] || ""}
-                        onChange={(e) => setSplitValue(m.user.id, e.target.value)}
-                      />
-                      <span className="text-gray-400">{splitType === "exact" ? "$" : "%"}</span>
-                    </>
-                  )}
-                </label>
-              );
-            })}
-          </div>
-
-          {expenseError && <p className="text-sm text-red-600">{expenseError}</p>}
-
-          <button className="bg-emerald-600 text-white px-4 py-2 rounded font-medium hover:bg-emerald-700">
-            Add expense
-          </button>
-        </form>
-        )}
-      </section>
-
-      <section>
-        <h2 className="font-semibold mb-2">Activity</h2>
-
-        {group.expenses.length > 0 && (
-          <div className="bg-white border rounded p-3 mb-3 space-y-2 text-sm" role="search">
-            <input
-              className="w-full border rounded px-2 py-1"
-              placeholder="Search expenses"
-              aria-label="Search expenses"
-              value={filters.text}
-              onChange={setFilter("text")}
-            />
-            <div className="flex flex-wrap gap-2 items-center">
-              <select
-                className="border rounded px-2 py-1"
-                aria-label="Filter by category"
-                value={filters.category}
-                onChange={setFilter("category")}
-              >
-                <option value="">All categories</option>
-                {categories.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="border rounded px-2 py-1"
-                aria-label="Filter by payer"
-                value={filters.payerId}
-                onChange={setFilter("payerId")}
-              >
-                <option value="">Anyone paid</option>
-                {group.members.map((m) => (
-                  <option key={m.user.id} value={String(m.user.id)}>
-                    {m.user.name}
-                  </option>
-                ))}
-              </select>
-              <label className="flex items-center gap-1 text-xs text-gray-600">
-                From
+              <div className="flex gap-2">
                 <input
-                  type="date"
-                  className="border rounded px-2 py-1 text-sm"
-                  aria-label="From date"
-                  value={filters.from}
-                  onChange={setFilter("from")}
+                  className="flex-1 border rounded px-3 py-2"
+                  placeholder="Description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
                 />
-              </label>
-              <label className="flex items-center gap-1 text-xs text-gray-600">
-                To
                 <input
-                  type="date"
-                  className="border rounded px-2 py-1 text-sm"
-                  aria-label="To date"
-                  value={filters.to}
-                  onChange={setFilter("to")}
+                  className="w-28 border rounded px-3 py-2"
+                  type="number"
+                  step="0.01"
+                  placeholder="Amount"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
                 />
-              </label>
-              {filtering && (
-                <button
-                  type="button"
-                  onClick={() => setFilters(EMPTY_FILTERS)}
-                  className="text-xs text-emerald-600 hover:underline"
+              </div>
+
+              <div className="flex gap-2 items-center text-sm">
+                <label className="text-gray-600 whitespace-nowrap">Paid by</label>
+                <select
+                  aria-label="Paid by"
+                  className="border rounded px-2 py-1"
+                  value={paidBy}
+                  onChange={(e) => setPaidBy(Number(e.target.value))}
                 >
-                  Clear filters
-                </button>
-              )}
-            </div>
-            {filtering && (
-              <p className="text-xs text-gray-600" aria-live="polite">
-                Showing {visibleExpenses.length} of {group.expenses.length}{" "}
-                {group.expenses.length === 1 ? "expense" : "expenses"} · ${formatCents(visibleTotal)}
-              </p>
-            )}
-          </div>
-        )}
+                  {group.members.map((m) => (
+                    <option key={m.user.id} value={m.user.id}>
+                      {m.user.id === user.id ? "You" : m.user.name}
+                    </option>
+                  ))}
+                </select>
 
-        {filtering && visibleExpenses.length === 0 && (
-          <p className="text-sm text-gray-500">No expenses match these filters.</p>
-        )}
+                <label className="text-gray-600 ml-4">Split</label>
+                <select
+                  className="border rounded px-2 py-1"
+                  value={splitType}
+                  onChange={(e) => setSplitType(e.target.value)}
+                >
+                  <option value="equal">Equally</option>
+                  <option value="exact">By exact amount</option>
+                  <option value="percentage">By percentage</option>
+                </select>
+              </div>
 
-        <ul className="space-y-2">
-          {visibleExpenses.map((exp) =>
-            editingId === exp.id ? (
-              <li key={exp.id} className="bg-white border rounded p-3 text-sm">
-                <form onSubmit={(e) => handleSaveEdit(e, exp.id)} className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 border rounded px-2 py-1"
-                      placeholder="Description"
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                    />
-                    <input
-                      className="w-24 border rounded px-2 py-1"
-                      type="number"
-                      step="0.01"
-                      placeholder="Amount"
-                      value={editAmount}
-                      onChange={(e) => setEditAmount(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex gap-2 items-center text-xs">
-                    <label className="text-gray-600">Paid by</label>
-                    <select
-                      className="border rounded px-2 py-1"
-                      value={editPaidBy ?? ""}
-                      onChange={(e) => setEditPaidBy(Number(e.target.value))}
-                    >
-                      {group.members.map((m) => (
-                        <option key={m.user.id} value={m.user.id}>
-                          {m.user.id === user.id ? "You" : m.user.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    <label className="text-gray-600 ml-2">Split</label>
-                    <select
-                      className="border rounded px-2 py-1"
-                      value={editSplitType}
-                      onChange={(e) => setEditSplitType(e.target.value)}
-                    >
-                      <option value="equal">Equally</option>
-                      <option value="exact">By exact amount</option>
-                      <option value="percentage">By percentage</option>
-                    </select>
-                  </div>
-
-                  {editSplitType !== "equal" && (
-                    <div className="space-y-1 bg-gray-50 border rounded p-2">
-                      {group.members.map((m) => (
-                        <div key={m.user.id} className="flex items-center gap-2 text-xs">
-                          <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
+              <div className="space-y-1 bg-white border rounded p-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Split between</p>
+                {group.members.map((m) => {
+                  const checked = splitMembers === null || splitMembers.includes(m.user.id);
+                  return (
+                    <label key={m.user.id} className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={checked} onChange={() => toggleSplitMember(m.user.id)} />
+                      <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
+                      {splitType !== "equal" && checked && (
+                        <>
                           <input
-                            className="w-20 border rounded px-2 py-1"
+                            className="w-24 border rounded px-2 py-1"
                             type="number"
                             step="0.01"
-                            placeholder={editSplitType === "exact" ? "$" : "%"}
-                            value={editSplitValues[m.user.id] || ""}
-                            onChange={(e) => setEditSplitValue(m.user.id, e.target.value)}
+                            placeholder={splitType === "exact" ? "$" : "%"}
+                            value={splitValues[m.user.id] || ""}
+                            onChange={(e) => setSplitValue(m.user.id, e.target.value)}
                           />
-                          <span className="text-gray-400">{editSplitType === "exact" ? "$" : "%"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                          <span className="text-gray-400">{splitType === "exact" ? "$" : "%"}</span>
+                        </>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
 
-                  {editError && <p className="text-xs text-red-600">{editError}</p>}
+              {expenseError && <p className="text-sm text-red-600">{expenseError}</p>}
 
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      className="text-xs bg-emerald-600 text-white px-3 py-1 rounded font-medium hover:bg-emerald-700"
-                    >
-                      Save
-                    </button>
+              <button className="bg-emerald-600 text-white px-4 py-2 rounded font-medium hover:bg-emerald-700">
+                Add expense
+              </button>
+            </form>
+            )}
+          </section>
+
+          <section>
+            <h2 className="font-semibold mb-2">Activity</h2>
+
+            {group.expenses.length > 0 && (
+              <div className="bg-white border rounded p-3 mb-3 space-y-2 text-sm" role="search">
+                <input
+                  className="w-full border rounded px-2 py-1"
+                  placeholder="Search expenses"
+                  aria-label="Search expenses"
+                  value={filters.text}
+                  onChange={setFilter("text")}
+                />
+                <div className="flex flex-wrap gap-2 items-center">
+                  <select
+                    className="border rounded px-2 py-1"
+                    aria-label="Filter by category"
+                    value={filters.category}
+                    onChange={setFilter("category")}
+                  >
+                    <option value="">All categories</option>
+                    {categories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="border rounded px-2 py-1"
+                    aria-label="Filter by payer"
+                    value={filters.payerId}
+                    onChange={setFilter("payerId")}
+                  >
+                    <option value="">Anyone paid</option>
+                    {group.members.map((m) => (
+                      <option key={m.user.id} value={String(m.user.id)}>
+                        {m.user.name}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="flex items-center gap-1 text-xs text-gray-600">
+                    From
+                    <input
+                      type="date"
+                      className="border rounded px-2 py-1 text-sm"
+                      aria-label="From date"
+                      value={filters.from}
+                      onChange={setFilter("from")}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-gray-600">
+                    To
+                    <input
+                      type="date"
+                      className="border rounded px-2 py-1 text-sm"
+                      aria-label="To date"
+                      value={filters.to}
+                      onChange={setFilter("to")}
+                    />
+                  </label>
+                  {filtering && (
                     <button
                       type="button"
-                      onClick={cancelEdit}
-                      className="text-xs border px-3 py-1 rounded hover:bg-gray-50"
+                      onClick={() => setFilters(EMPTY_FILTERS)}
+                      className="text-xs text-emerald-600 hover:underline"
                     >
-                      Cancel
+                      Clear filters
                     </button>
-                  </div>
-                </form>
-              </li>
-            ) : (
-              <li key={exp.id} className="bg-white border rounded p-3 text-sm flex items-start justify-between gap-2">
-                <div>
-                  <span className="font-medium">{exp.payer.name}</span> paid{" "}
-                  <span className="font-medium">${formatCents(exp.amount)}</span> for{" "}
-                  {exp.description}
-                  {exp.category && categories.length > 0 && (
-                    <select
-                      value={exp.category}
-                      onChange={(e) => handleCategoryChange(exp.id, e.target.value)}
-                      title="Change category"
-                      className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle border-0 cursor-pointer"
-                    >
-                      {categories.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {exp.category && categories.length === 0 && (
-                    <span className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle">
-                      {exp.category}
-                    </span>
                   )}
                 </div>
-                {exp.payer.id === user.id && !group.isFinalized && (
-                  <div className="flex gap-2 shrink-0 text-xs">
-                    <button onClick={() => startEdit(exp)} className="text-emerald-600 hover:underline">
-                      Edit
-                    </button>
-                    <button onClick={() => handleDeleteExpense(exp.id)} className="text-red-600 hover:underline">
-                      Delete
-                    </button>
-                  </div>
+                {filtering && (
+                  <p className="text-xs text-gray-600" aria-live="polite">
+                    Showing {visibleExpenses.length} of {group.expenses.length}{" "}
+                    {group.expenses.length === 1 ? "expense" : "expenses"} · ${formatCents(visibleTotal)}
+                  </p>
                 )}
-              </li>
-            )
-          )}
-        </ul>
-      </section>
+              </div>
+            )}
+
+            {filtering && visibleExpenses.length === 0 && (
+              <p className="text-sm text-gray-500">No expenses match these filters.</p>
+            )}
+
+            <ul className="space-y-2">
+              {visibleExpenses.map((exp) =>
+                editingId === exp.id ? (
+                  <li key={exp.id} className="bg-white border rounded p-3 text-sm">
+                    <form onSubmit={(e) => handleSaveEdit(e, exp.id)} className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          className="flex-1 border rounded px-2 py-1"
+                          placeholder="Description"
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                        />
+                        <input
+                          className="w-24 border rounded px-2 py-1"
+                          type="number"
+                          step="0.01"
+                          placeholder="Amount"
+                          value={editAmount}
+                          onChange={(e) => setEditAmount(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="flex gap-2 items-center text-xs">
+                        <label className="text-gray-600 whitespace-nowrap">Paid by</label>
+                        <select
+                          className="border rounded px-2 py-1"
+                          value={editPaidBy ?? ""}
+                          onChange={(e) => setEditPaidBy(Number(e.target.value))}
+                        >
+                          {group.members.map((m) => (
+                            <option key={m.user.id} value={m.user.id}>
+                              {m.user.id === user.id ? "You" : m.user.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <label className="text-gray-600 ml-2">Split</label>
+                        <select
+                          className="border rounded px-2 py-1"
+                          value={editSplitType}
+                          onChange={(e) => setEditSplitType(e.target.value)}
+                        >
+                          <option value="equal">Equally</option>
+                          <option value="exact">By exact amount</option>
+                          <option value="percentage">By percentage</option>
+                        </select>
+                      </div>
+
+                      {editSplitType !== "equal" && (
+                        <div className="space-y-1 bg-gray-50 border rounded p-2">
+                          {group.members.map((m) => (
+                            <div key={m.user.id} className="flex items-center gap-2 text-xs">
+                              <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
+                              <input
+                                className="w-20 border rounded px-2 py-1"
+                                type="number"
+                                step="0.01"
+                                placeholder={editSplitType === "exact" ? "$" : "%"}
+                                value={editSplitValues[m.user.id] || ""}
+                                onChange={(e) => setEditSplitValue(m.user.id, e.target.value)}
+                              />
+                              <span className="text-gray-400">{editSplitType === "exact" ? "$" : "%"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {editError && <p className="text-xs text-red-600">{editError}</p>}
+
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          className="text-xs bg-emerald-600 text-white px-3 py-1 rounded font-medium hover:bg-emerald-700"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEdit}
+                          className="text-xs border px-3 py-1 rounded hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  </li>
+                ) : (
+                  <li key={exp.id} className="bg-white border rounded p-3 text-sm flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-medium">{exp.payer.name}</span> paid{" "}
+                      <span className="font-medium">${formatCents(exp.amount)}</span> for{" "}
+                      {exp.description}
+                      {exp.category && categories.length > 0 && (
+                        <select
+                          value={exp.category}
+                          onChange={(e) => handleCategoryChange(exp.id, e.target.value)}
+                          title="Change category"
+                          className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle border-0 cursor-pointer"
+                        >
+                          {categories.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {exp.category && categories.length === 0 && (
+                        <span className="ml-2 inline-block text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full align-middle">
+                          {exp.category}
+                        </span>
+                      )}
+                    </div>
+                    {exp.payer.id === user.id && !group.isFinalized && (
+                      <div className="flex gap-2 shrink-0 text-xs">
+                        <button onClick={() => startEdit(exp)} className="text-emerald-600 hover:underline">
+                          Edit
+                        </button>
+                        <button onClick={() => handleDeleteExpense(exp.id)} className="text-red-600 hover:underline">
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                )
+              )}
+            </ul>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

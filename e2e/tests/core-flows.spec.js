@@ -143,7 +143,9 @@ test("shows per-person balances on the dashboard for both people", async ({ page
   await expect(page.getByText("Farmers market haul")).toBeVisible();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Balances" })).toBeVisible();
+  // exact: the default is a case-insensitive substring match, which also
+  // matches the assistant's "Ask about your balances" heading.
+  await expect(page.getByRole("heading", { name: "Balances", exact: true })).toBeVisible();
   await expect(page.getByText(/owes you \$15\.00/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Balances Club" }).first()).toBeVisible();
 

@@ -62,11 +62,16 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Hi, {user?.name}</h1>
       </div>
 
+      {/* Same split as a group page: what you owe and where to go in the
+          main column, the things you study or ask alongside it. Collapses to
+          one column below `lg`, balances first. */}
+      <div className="lg:grid lg:grid-cols-3 lg:gap-8 lg:items-start">
+        <div className="lg:order-1 lg:col-span-2">
       {/* Above spending on purpose: who you owe is the thing you open a
           bill-splitting app to find out. */}
       {balances && (
@@ -75,16 +80,6 @@ export default function DashboardPage() {
           <BalancesPanel balances={balances} />
         </section>
       )}
-
-      <section className="mb-8">
-        <h2 className="font-semibold mb-2">Your Spending</h2>
-        <InsightsPanel items={insightItems} dimensionLabel="Group" dimension={(item) => item.groupName} />
-      </section>
-
-      <section className="mb-8">
-        <h2 className="font-semibold mb-2">Ask about your balances</h2>
-        <AssistantChat />
-      </section>
 
       <form onSubmit={handleCreateGroup} className="mb-6 space-y-2">
         <div className="flex gap-2">
@@ -128,6 +123,25 @@ export default function DashboardPage() {
         {groups.length === 0 && (
           <p className="text-gray-500 text-sm">No groups yet — create one above.</p>
         )}
+      </div>
+        </div>
+
+        <aside className="lg:order-2 mt-8 lg:mt-0">
+          <section className="mb-8">
+            <h2 className="font-semibold mb-2">Your Spending</h2>
+            <InsightsPanel
+              items={insightItems}
+              dimensionLabel="Group"
+              dimension={(item) => item.groupName}
+              stacked
+            />
+          </section>
+
+          <section>
+            <h2 className="font-semibold mb-2">Ask about your balances</h2>
+            <AssistantChat />
+          </section>
+        </aside>
       </div>
     </div>
   );

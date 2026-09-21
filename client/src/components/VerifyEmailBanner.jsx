@@ -27,7 +27,7 @@ export default function VerifyEmailBanner() {
 
   return (
     <div className="bg-amber-50 border-b border-amber-200">
-      <div className="max-w-2xl mx-auto px-6 py-3 text-sm text-amber-900 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="max-w-6xl mx-auto px-6 py-3 text-sm text-amber-900 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span>
           Confirm your email address to unlock the AI-powered features. Everything else works as normal.
         </span>
