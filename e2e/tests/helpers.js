@@ -58,4 +58,26 @@ async function logIn(page, user) {
   await page.getByRole("button", { name: "Log in" }).click();
 }
 
-module.exports = { uniqueUser, signUp, createGroup, accountMenu, logOut, logIn };
+// Adds an expense the manual way: description, amount, equal split with
+// everyone, submit.
+//
+// The manual fields sit behind an "Or enter it manually" toggle, because the
+// plain-English box and the receipt scanner above them are the fast paths.
+// Once opened they stay open for the next expense, so this only clicks the
+// toggle when it is still offering to open them. It waits for the form to
+// exist first: deciding "is it open?" against a page still loading would
+// click a toggle that then reads "Hide these fields".
+async function addExpense(page, description, amount) {
+  await page.getByLabel("Scan a receipt").waitFor({ state: "attached" });
+
+  const descriptionField = page.getByPlaceholder("Description").first();
+  if (!(await descriptionField.isVisible())) {
+    await page.getByRole("button", { name: "Or enter it manually" }).click();
+  }
+
+  await descriptionField.fill(description);
+  await page.getByPlaceholder("Amount").first().fill(amount);
+  await page.getByRole("button", { name: "Add expense" }).click();
+}
+
+module.exports = { uniqueUser, signUp, createGroup, addExpense, accountMenu, logOut, logIn };

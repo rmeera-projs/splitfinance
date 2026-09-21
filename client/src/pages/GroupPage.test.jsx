@@ -162,7 +162,55 @@ describe("GroupPage - rendering", () => {
   });
 });
 
+// The manual description/amount/split fields are collapsed until something
+// pre-fills them or the user asks for them, so any test that types into them
+// has to open them first.
+async function openManualFields(user) {
+  await user.click(screen.getByRole("button", { name: "Or enter it manually" }));
+}
+
 describe("GroupPage - adding an expense", () => {
+  test("keeps the manual fields collapsed until asked, then shows them", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    // The two quick paths stay visible; the long way round does not.
+    expect(screen.getByPlaceholderText(/dinner \$60/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Scan a receipt")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Description")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add expense" })).not.toBeInTheDocument();
+
+    await openManualFields(user);
+
+    expect(screen.getByPlaceholderText("Description")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add expense" })).toBeInTheDocument();
+  });
+
+  test("the toggle reports its state and can close the fields again without losing what was typed", async () => {
+    const user = userEvent.setup();
+    mockGroupResponse({ data: baseGroup() });
+
+    renderGroupPage();
+    await screen.findByText("Ski Trip");
+
+    const toggle = screen.getByRole("button", { name: "Or enter it manually" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle);
+    expect(screen.getByRole("button", { name: "Hide these fields" })).toHaveAttribute("aria-expanded", "true");
+    await user.type(screen.getByPlaceholderText("Description"), "Half typed");
+
+    await user.click(screen.getByRole("button", { name: "Hide these fields" }));
+    expect(screen.queryByPlaceholderText("Description")).not.toBeInTheDocument();
+
+    // Collapsing is only presentation - the draft is still there on reopening.
+    await user.click(screen.getByRole("button", { name: "Or enter it manually" }));
+    expect(screen.getByPlaceholderText("Description")).toHaveValue("Half typed");
+  });
+
   test("submits an equal split across all members", async () => {
     const user = userEvent.setup();
     mockGroupResponse({ data: baseGroup() });
@@ -171,6 +219,7 @@ describe("GroupPage - adding an expense", () => {
     renderGroupPage();
     await screen.findByText("Ski Trip");
 
+    await openManualFields(user);
     await user.type(screen.getByPlaceholderText("Description"), "Groceries");
     await user.type(screen.getByPlaceholderText("Amount"), "50");
     await user.click(screen.getByRole("button", { name: "Add expense" }));
@@ -201,6 +250,7 @@ describe("GroupPage - adding an expense", () => {
     renderGroupPage();
     await screen.findByText("Ski Trip");
 
+    await openManualFields(user);
     await user.type(screen.getByPlaceholderText("Description"), "Sweets");
     await user.type(screen.getByPlaceholderText("Amount"), "0.05");
     await user.click(screen.getByRole("button", { name: "Add expense" }));
@@ -226,6 +276,7 @@ describe("GroupPage - adding an expense", () => {
     renderGroupPage();
     await screen.findByText("Ski Trip");
 
+    await openManualFields(user);
     await user.type(screen.getByPlaceholderText("Description"), "Odd");
     await user.type(screen.getByPlaceholderText("Amount"), "10.234");
     await user.click(screen.getByRole("button", { name: "Add expense" }));
@@ -295,6 +346,10 @@ describe("GroupPage - scanning a receipt", () => {
     await user.upload(screen.getByLabelText("Scan a receipt"), photo());
 
     expect(await screen.findByText(/couldn't read a total/i)).toBeInTheDocument();
+    // Nothing was read, so nothing was pre-filled - and with nothing to
+    // review, the fields stay closed rather than opening on an empty form.
+    expect(screen.queryByPlaceholderText("Amount")).not.toBeInTheDocument();
+    await openManualFields(user);
     expect(screen.getByPlaceholderText("Amount")).toHaveValue(null);
   });
 });
@@ -470,6 +525,7 @@ describe("GroupPage - natural-language expense entry", () => {
     renderGroupPage();
     await screen.findByText("Ski Trip");
 
+    await openManualFields(user);
     await user.type(screen.getByPlaceholderText("Description"), "Groceries");
     await user.type(screen.getByPlaceholderText("Amount"), "50");
     await user.click(screen.getByRole("checkbox", { name: "Bob" }));
@@ -490,6 +546,7 @@ describe("GroupPage - natural-language expense entry", () => {
     renderGroupPage();
     await screen.findByText("Ski Trip");
 
+    await openManualFields(user);
     await user.type(screen.getByPlaceholderText("Description"), "Groceries");
     await user.type(screen.getByPlaceholderText("Amount"), "50");
     await user.click(screen.getByRole("checkbox", { name: "You" }));
@@ -517,6 +574,8 @@ describe("GroupPage - natural-language expense entry", () => {
     await user.click(screen.getByRole("button", { name: "Fill in form" }));
 
     expect(await screen.findByText("Couldn't understand that")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Description")).not.toBeInTheDocument();
+    await openManualFields(user);
     expect(screen.getByPlaceholderText("Description")).toHaveValue("");
   });
 });

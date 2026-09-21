@@ -51,6 +51,9 @@ export default function GroupPage() {
   // The last scan that read individual line items, while the per-item
   // splitter is open. Null once applied, cancelled, or the expense is added.
   const [scannedReceipt, setScannedReceipt] = useState(null);
+  // The manual description/amount/split fields, collapsed by default. Opened
+  // by the toggle, and automatically whenever something pre-fills them.
+  const [manualOpen, setManualOpen] = useState(false);
 
   // Fixed category list from the server (see categorizationService),
   // used to populate the manual-override dropdown on each expense.
@@ -232,6 +235,7 @@ export default function GroupPage() {
       // exactly those people. null falls back to "everyone" as usual.
       setSplitMembers(data.splitWithIds && data.splitWithIds.length > 0 ? data.splitWithIds : null);
 
+      setManualOpen(true);
       setNlText("");
     } catch (err) {
       setNlError(err.response?.data?.error || "Couldn't understand that - try rephrasing, or fill in the form below");
@@ -261,6 +265,7 @@ export default function GroupPage() {
       // Line items are best-effort - a receipt that only yielded a total
       // just pre-fills the form as before, with no splitter to open.
       setScannedReceipt(data.items?.length > 0 ? data : null);
+      setManualOpen(true);
     } catch (err) {
       setScannedReceipt(null);
       setReceiptError(err.response?.data?.error || "Couldn't read that receipt - try again, or fill in the form below");
@@ -282,6 +287,7 @@ export default function GroupPage() {
     setSplitMembers(owing.map(([userId]) => Number(userId)));
     setSplitValues(Object.fromEntries(owing.map(([userId, cents]) => [userId, centsToInputValue(cents)])));
     setScannedReceipt(null);
+    setManualOpen(true);
   }
 
   async function handleAddExpense(e) {
@@ -727,81 +733,101 @@ export default function GroupPage() {
                 )}
               </div>
 
-              <div className="flex gap-2">
-                <input
-                  className="flex-1 border rounded px-3 py-2"
-                  placeholder="Description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-                <input
-                  className="w-28 border rounded px-3 py-2"
-                  type="number"
-                  step="0.01"
-                  placeholder="Amount"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                />
-              </div>
-
-              <div className="flex gap-2 items-center text-sm">
-                <label className="text-gray-600 whitespace-nowrap">Paid by</label>
-                <select
-                  aria-label="Paid by"
-                  className="border rounded px-2 py-1"
-                  value={paidBy}
-                  onChange={(e) => setPaidBy(Number(e.target.value))}
-                >
-                  {group.members.map((m) => (
-                    <option key={m.user.id} value={m.user.id}>
-                      {m.user.id === user.id ? "You" : m.user.name}
-                    </option>
-                  ))}
-                </select>
-
-                <label className="text-gray-600 ml-4">Split</label>
-                <select
-                  className="border rounded px-2 py-1"
-                  value={splitType}
-                  onChange={(e) => setSplitType(e.target.value)}
-                >
-                  <option value="equal">Equally</option>
-                  <option value="exact">By exact amount</option>
-                  <option value="percentage">By percentage</option>
-                </select>
-              </div>
-
-              <div className="space-y-1 bg-white border rounded p-3">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Split between</p>
-                {group.members.map((m) => {
-                  const checked = splitMembers === null || splitMembers.includes(m.user.id);
-                  return (
-                    <label key={m.user.id} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={checked} onChange={() => toggleSplitMember(m.user.id)} />
-                      <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
-                      {splitType !== "equal" && checked && (
-                        <>
-                          <input
-                            className="w-24 border rounded px-2 py-1"
-                            type="number"
-                            step="0.01"
-                            placeholder={splitType === "exact" ? "$" : "%"}
-                            value={splitValues[m.user.id] || ""}
-                            onChange={(e) => setSplitValue(m.user.id, e.target.value)}
-                          />
-                          <span className="text-gray-400">{splitType === "exact" ? "$" : "%"}</span>
-                        </>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-
-              {expenseError && <p className="text-sm text-red-600">{expenseError}</p>}
-
-              <button className="bg-emerald-600 text-white px-4 py-2 rounded font-medium hover:bg-emerald-700">
-                Add expense
+              {/* The plain-English box and the receipt scanner above are one
+                  input each; these fields are the long way round, and leaving
+                  them permanently open pushed the expense list off the screen.
+                  A parse, a scan or an applied receipt split opens them
+                  automatically, so the "check it before submitting" step those
+                  rely on is unchanged. */}
+              <button
+                type="button"
+                onClick={() => setManualOpen((open) => !open)}
+                aria-expanded={manualOpen}
+                aria-controls="manual-expense-fields"
+                className="text-sm text-emerald-700 hover:underline py-2"
+              >
+                {manualOpen ? "Hide these fields" : "Or enter it manually"}
               </button>
+
+              {manualOpen && (
+                <div id="manual-expense-fields" className="space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 border rounded px-3 py-2"
+                    placeholder="Description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                  <input
+                    className="w-28 border rounded px-3 py-2"
+                    type="number"
+                    step="0.01"
+                    placeholder="Amount"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                  />
+                </div>
+
+                <div className="flex gap-2 items-center text-sm">
+                  <label className="text-gray-600 whitespace-nowrap">Paid by</label>
+                  <select
+                    aria-label="Paid by"
+                    className="border rounded px-2 py-1"
+                    value={paidBy}
+                    onChange={(e) => setPaidBy(Number(e.target.value))}
+                  >
+                    {group.members.map((m) => (
+                      <option key={m.user.id} value={m.user.id}>
+                        {m.user.id === user.id ? "You" : m.user.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label className="text-gray-600 ml-4">Split</label>
+                  <select
+                    className="border rounded px-2 py-1"
+                    value={splitType}
+                    onChange={(e) => setSplitType(e.target.value)}
+                  >
+                    <option value="equal">Equally</option>
+                    <option value="exact">By exact amount</option>
+                    <option value="percentage">By percentage</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1 bg-white border rounded p-3">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Split between</p>
+                  {group.members.map((m) => {
+                    const checked = splitMembers === null || splitMembers.includes(m.user.id);
+                    return (
+                      <label key={m.user.id} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={checked} onChange={() => toggleSplitMember(m.user.id)} />
+                        <span className="flex-1">{m.user.id === user.id ? "You" : m.user.name}</span>
+                        {splitType !== "equal" && checked && (
+                          <>
+                            <input
+                              className="w-24 border rounded px-2 py-1"
+                              type="number"
+                              step="0.01"
+                              placeholder={splitType === "exact" ? "$" : "%"}
+                              value={splitValues[m.user.id] || ""}
+                              onChange={(e) => setSplitValue(m.user.id, e.target.value)}
+                            />
+                            <span className="text-gray-400">{splitType === "exact" ? "$" : "%"}</span>
+                          </>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {expenseError && <p className="text-sm text-red-600">{expenseError}</p>}
+
+                <button className="bg-emerald-600 text-white px-4 py-2 rounded font-medium hover:bg-emerald-700">
+                  Add expense
+                </button>
+                </div>
+              )}
             </form>
             )}
           </section>

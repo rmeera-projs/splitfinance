@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const path = require("path");
-const { signUp, createGroup, logIn } = require("./helpers");
+const { signUp, createGroup, addExpense, logIn } = require("./helpers");
 
 // Generates the screenshots embedded at the top of the README, by driving
 // the real app rather than mocking up a picture of it - so what a reader
@@ -59,23 +59,24 @@ test("capture dashboard and group views", async ({ page, browser }) => {
     ["Airport taxi", "38.40"],
   ];
   for (const [description, amount] of expenses) {
-    await page.getByPlaceholder("Description").first().fill(description);
-    await page.getByPlaceholder("Amount").first().fill(amount);
-    await page.getByRole("button", { name: "Add expense" }).click();
+    await addExpense(page, description, amount);
     await expect(page.getByText(description)).toBeVisible();
   }
 
   // Full page here: the expense list sits below the insights and the
   // add-expense form, so a viewport-sized shot would cut off the very thing
   // a reader wants to see.
+  // Reloaded first: adding the expenses above opened the manual fields, and
+  // this image should show what someone sees when they arrive, not the state
+  // the setup left behind.
+  await page.reload();
+  await expect(page.getByText("Airport taxi")).toBeVisible();
   await page.screenshot({ path: path.join(OUT_DIR, "group.png"), fullPage: true });
 
   // A second group, so the dashboard isn't a one-item list.
   await page.goto("/");
   await createGroup(page, "Flat 2B - Utilities", [JORDAN.username]);
-  await page.getByPlaceholder("Description").first().fill("October internet");
-  await page.getByPlaceholder("Amount").first().fill("45");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "October internet", "45");
   await expect(page.getByText("October internet")).toBeVisible();
 
   await page.goto("/");

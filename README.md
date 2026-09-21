@@ -725,21 +725,21 @@ incident.
 
 ## 🧪 Testing
 
-610 tests across three layers, deliberately rather than incidentally: a
+612 tests across three layers, deliberately rather than incidentally: a
 fast mocked layer for logic, a real-database layer for everything mocks
 structurally can't prove, and a browser layer for the flows a user actually
 performs.
 
 | Layer | Count | What's real | What's mocked |
 |---|---|---|---|
-| Unit | 523 (302 backend, 221 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
+| Unit | 525 (302 backend, 223 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
 | Integration | 70 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
 | End-to-end | 17 | everything — real browser, real API, real database | nothing |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
 cd server && npm test        # 302 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 221 (Vitest + React Testing Library)
+cd client && npm test        # 223 (Vitest + React Testing Library)
 ```
 
 **Integration** (`server/tests/integration/`) runs the real app against a

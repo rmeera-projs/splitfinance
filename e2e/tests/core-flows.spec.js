@@ -1,6 +1,6 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("fs");
-const { uniqueUser, signUp, createGroup, accountMenu, logOut, logIn } = require("./helpers");
+const { uniqueUser, signUp, createGroup, addExpense, accountMenu, logOut, logIn } = require("./helpers");
 
 test("signup lands on the dashboard with the new account's name", async ({ page }) => {
   const user = await signUp(page);
@@ -43,9 +43,7 @@ test("adding an expense splits it and shows who owes whom", async ({ page, brows
   await signUp(page);
   await createGroup(page, "Dinner Club", [other.username]);
 
-  await page.getByPlaceholder("Description").first().fill("Tasting menu");
-  await page.getByPlaceholder("Amount").first().fill("80");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Tasting menu", "80");
 
   // $80 paid by me, split evenly with one other person -> they owe me $40.
   await expect(page.getByText("Tasting menu")).toBeVisible();
@@ -66,9 +64,7 @@ test("settling up clears the balance", async ({ page, browser }) => {
   const payerPage = await payerContext.newPage();
   await signUp(payerPage);
   await createGroup(payerPage, "Road Trip", [debtor.username]);
-  await payerPage.getByPlaceholder("Description").first().fill("Gas");
-  await payerPage.getByPlaceholder("Amount").first().fill("50");
-  await payerPage.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(payerPage, "Gas", "50");
   await expect(payerPage.getByText(/\$25\.00/).first()).toBeVisible();
   const groupUrl = payerPage.url();
   await payerContext.close();
@@ -102,9 +98,7 @@ test("records a partial settlement and leaves the remainder owing", async ({ pag
   const payerPage = await payerContext.newPage();
   await signUp(payerPage);
   await createGroup(payerPage, "Partial Trip", [debtor.username]);
-  await payerPage.getByPlaceholder("Description").first().fill("Hotel");
-  await payerPage.getByPlaceholder("Amount").first().fill("100");
-  await payerPage.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(payerPage, "Hotel", "100");
   await expect(payerPage.getByText(/\$50\.00/).first()).toBeVisible();
   const groupUrl = payerPage.url();
   await payerContext.close();
@@ -137,9 +131,7 @@ test("shows per-person balances on the dashboard for both people", async ({ page
   await createGroup(page, "Balances Club", [friend.username]);
   // Not "Groceries" - that is also a category name, so it matches a hidden
   // <option> in the category dropdown before it matches the expense.
-  await page.getByPlaceholder("Description").first().fill("Farmers market haul");
-  await page.getByPlaceholder("Amount").first().fill("30");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Farmers market haul", "30");
   await expect(page.getByText("Farmers market haul")).toBeVisible();
 
   await page.goto("/");
@@ -170,9 +162,7 @@ test("splits an amount that doesn't divide evenly, down to the cent", async ({ p
   await signUp(page);
   await createGroup(page, "Corner Shop", [other.username]);
 
-  await page.getByPlaceholder("Description").first().fill("Penny sweets");
-  await page.getByPlaceholder("Amount").first().fill("0.05");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Penny sweets", "0.05");
 
   await expect(page.getByText("Penny sweets")).toBeVisible();
   // The expense renders as $0.05, and the other person owes the 2c half.
@@ -228,9 +218,7 @@ test("delivers a live update to another member over the socket", async ({ page, 
   await otherPage.goto(groupUrl);
   await expect(otherPage.getByRole("heading", { name: "Live Updates" })).toBeVisible();
 
-  await page.getByPlaceholder("Description").first().fill("Concert tickets");
-  await page.getByPlaceholder("Amount").first().fill("120");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Concert tickets", "120");
   await expect(page.getByText("Concert tickets")).toBeVisible();
 
   // No reload here - this only appears if the socket handshake authenticated
@@ -273,9 +261,7 @@ test("an unconfirmed account can split expenses but not use the AI parser", asyn
 
   // The ordinary path is untouched - this is the whole reason verification
   // gates the AI rather than the app.
-  await page.getByPlaceholder("Description").first().fill("Coffee");
-  await page.getByPlaceholder("Amount").first().fill("6");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Coffee", "6");
   await expect(page.getByText("Coffee")).toBeVisible();
 
   // The AI-backed control is the only thing that refuses, and it explains
@@ -330,14 +316,10 @@ test("searching narrows the expense list and clearing brings it back", async ({ 
   await signUp(page);
   await createGroup(page, "Camping Trip");
 
-  await page.getByPlaceholder("Description").first().fill("Tent rental");
-  await page.getByPlaceholder("Amount").first().fill("40");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Tent rental", "40");
   await expect(page.getByText("Tent rental")).toBeVisible();
 
-  await page.getByPlaceholder("Description").first().fill("Firewood");
-  await page.getByPlaceholder("Amount").first().fill("15");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Firewood", "15");
   await expect(page.getByText("Firewood")).toBeVisible();
 
   await page.getByLabel("Search expenses").fill("tent");
@@ -363,9 +345,7 @@ test("exporting a group downloads an expenses CSV and a settlements CSV", async 
   await signUp(page);
   await createGroup(page, "Export Test Trip", [debtor.username]);
 
-  await page.getByPlaceholder("Description").first().fill("Campsite fee");
-  await page.getByPlaceholder("Amount").first().fill("60");
-  await page.getByRole("button", { name: "Add expense" }).click();
+  await addExpense(page, "Campsite fee", "60");
   await expect(page.getByText("Campsite fee")).toBeVisible();
 
   const downloads = [];
