@@ -266,7 +266,7 @@ jobs:
       # access-key secret stored in this repo at all, and the role can only
       # be assumed by this exact repo's own main-branch workflow runs.
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::918441609401:role/splitfinance-github-actions-deploy
           aws-region: us-east-1
