@@ -2,7 +2,8 @@
 
 A full-stack expense-splitting app: track shared expenses across a group,
 let an AI categorise, parse and read them (typed or photographed), ask it
-about your balances, and settle up in as few payments as the math allows.
+about your balances, and simplify group debt into at most n−1 settlement
+payments.
 
 🔗 **Live at [splitfinance.org](https://splitfinance.org)** · API health check: [api.splitfinance.org](https://api.splitfinance.org/health)
 
@@ -50,10 +51,15 @@ flowchart LR
     GH["GitHub Actions<br/>test · lint · deploy via OIDC"] -.-> EC2
 ```
 
+27 REST endpoints across 8 resources. Full tech stack, package layout, and
+subsystem-by-subsystem detail (AI, WebSockets, spending insights, password
+reset) are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 Everything below is the detail — [Features](#-features) first, then the
-[algorithm](#-the-interesting-part-debt-simplification),
-[AI](#-ai-features-cohere), [security](#-security), and
-[deployment](#-deploying-for-real).
+[algorithm](#-the-interesting-part-debt-simplification) and [money](#-money)
+write-ups, then [Getting Started](#-getting-started). Security, testing, the
+database schema, and deployment each have their own doc, linked from the
+matching section below.
 
 ## ✨ Features
 
@@ -141,395 +147,48 @@ possible list of payments in every case.
 
 ## 🤖 AI Features (Cohere)
 
-### Auto-Categorization
+Four Cohere-backed features, all optional - the app works fully without an API
+key, each one just falls back or becomes unavailable - and all gated on a
+confirmed email address, since a free, instant signup is the cheap route to
+someone else's metered quota:
 
-Every expense is automatically tagged with one of 9 fixed categories (Food &
-Drink, Groceries, Transportation, Housing & Utilities, Entertainment, Shopping,
-Travel, Health & Wellness, Other) so spending is queryable by kind without any
-manual tagging. This is implemented in
-[`categorizationService.js`](server/src/services/categorizationService.js):
+- **Auto-Categorization** - every expense is tagged with one of 9 fixed
+  categories from a few-shot prompt over Cohere's Chat endpoint; no key means
+  everything falls back to `"Other"`
+- **Natural-Language Expense Entry** - "Dinner $60, I paid, split with Bob
+  and Charlie" becomes a pre-filled form, never a submitted expense
+- **Receipt Scanning** - photograph a receipt and a vision model reads the
+  merchant, total and line items; a per-item splitter then spreads tax and tip
+  in proportion to what each person ordered, exact to the cent
+- **Balances & Spending Assistant** - a tool-calling agent that answers
+  questions about your own balances and spending by calling the same services
+  the rest of the app already uses, never its own arithmetic; no tool takes a
+  user id, so there's no argument a prompt-injection payload sitting in an
+  expense description could use to ask for someone else's data
 
-- Uses **Cohere's Chat endpoint** (`command-r7b-12-2024`) rather than the
-  Classify endpoint, which Cohere has deprecated
-- Drives the model with a **few-shot prompt** — one example description per
-  category — asking it to reply with just the category name
-- Normalizes the response (trims quotes/punctuation, matches case-insensitively)
-  against the fixed category list
-- **Never blocks expense creation**: a missing API key, a network/API error,
-  or an unrecognized response all fall back to `"Other"`
-- Only re-runs on an edit if the description actually changed, so fixing a
-  typo in the amount doesn't burn an extra API call
-- Fully unit-tested with a mocked Cohere client (`categorizationService.test.js`)
-  — no live API calls happen in the test suite
-
-If `COHERE_API_KEY` isn't set, every expense is simply categorized as `"Other"`
-— the app works fully without it. The same is true for an account that hasn't
-confirmed its email address yet: categorization is skipped rather than the
-expense being refused (see Security).
-
-### Natural-Language Expense Entry
-
-The add-expense form has a text box above its regular fields for describing
-an expense in plain English - "Dinner $60, I paid, split with Bob and
-Charlie" - which
-[`expenseParsingService.js`](server/src/services/expenseParsingService.js)
-turns into structured fields:
-
-- Same Cohere Chat endpoint as categorization, but prompted for a single
-  JSON object (`{description, amount, payerId, splitWithIds}`) instead of
-  a category label, with the group's actual members (id + name) listed in
-  the prompt so "Bob"/"I"/"me" resolve to real member ids rather than raw
-  names the rest of the app can't use
-- **Never creates the expense itself** - the parsed result only pre-fills
-  the existing add-expense form (description, amount, "Paid by", and the
-  split), so a bad parse just means editing the form before submitting,
-  never a wrong charge going through unreviewed
-- Drops any id the model hallucinates (a `payerId`/`splitWithIds` entry
-  that isn't an actual member of the group) rather than trusting it outright
-- A mentioned subset of members (not everyone) checks/unchecks the
-  add-expense form's "Split between" list to match, applying to whichever
-  split type is selected
-- Without `COHERE_API_KEY`, falls back to a much cruder regex-only parse
-  (just pulls out a dollar amount) rather than failing outright - same
-  "optional until you need it" spirit as auto-categorization
-- Fully unit-tested with a mocked Cohere client
-  (`expenseParsingService.test.js`)
-- **Requires a confirmed email address** - this is the one endpoint whose
-  entire purpose is the AI call, so it's also the only one that refuses
-  outright (with a `code: "EMAIL_NOT_VERIFIED"` the client keys its
-  "resend confirmation" prompt off). Adding an expense by hand is
-  unaffected. See Security
-
-### Receipt Scanning
-
-A "scan a receipt photo" link on the add-expense form uploads an image to
-`POST /api/expenses/receipt`, where
-[`receiptService.js`](server/src/services/receiptService.js) sends it to a
-Cohere vision model and gets back the merchant, the total and the line items:
-
-- **Never creates the expense** - it pre-fills the form (and opens the
-  per-item splitter), so a misread is something you correct before
-  submitting, never a wrong charge
-- **The upload path is deliberately narrow** - the first binary input in the
-  app: memory storage with a 5MB cap, the file type decided from its leading
-  bytes (JPEG/PNG/WebP) rather than its name, and the image is **never
-  written to disk or the database**. A receipt can carry a card's last digits
-  and a name, and the output is a few fields, so keeping it would only create
-  something to leak
-- **Line items are best-effort** - unusable ones (zero, negative,
-  non-numeric, or costing more than the whole bill) are dropped and the count
-  capped; a receipt with unreadable lines still yields a usable total
-- **The per-item splitter is exact to the cent** -
-  [`receiptSplit.js`](client/src/utils/receiptSplit.js) splits each item among
-  the people who had it, then spreads the rest (tax, tip, service charge, or a
-  net discount) in proportion to what each person ordered. The rest is
-  derived as "printed total minus items" rather than read off a scanned tax
-  line, so the result reconciles to the total even when a line was missed, and
-  leftover cents go by the largest-remainder method (BigInt for the products,
-  which overflow a double at the largest amounts)
-- Same gate as the other AI features: a confirmed email address and the
-  shared rate limits, run before the upload is buffered. Without a key the
-  route answers 503 and entering the expense by hand is unaffected
-
-### Balances & Spending Assistant
-
-A chat box on the dashboard, backed by `POST /api/assistant/ask` and
-[`assistantService.js`](server/src/services/assistantService.js) - a genuine
-tool-calling agent (Cohere's v2 chat API) rather than a single completion:
-
-- The model chooses among four read-only tools - `get_my_balances`,
-  `list_my_groups`, `get_group_balances`, `get_my_spending` - each a thin
-  wrapper over an existing, already-tested service, so the answers can't
-  disagree with the balances and insights pages
-- **No tool takes a user id.** Each closes over the authenticated caller, so
-  there is no argument a prompt-injection payload sitting in an expense
-  description could use to ask for someone else's data. The one unavoidable
-  parameter, `groupId`, is checked against membership before any query runs
-- Dollar figures are formatted to strings before the model sees them, and it
-  is told to quote them verbatim rather than doing arithmetic
-- The tool loop is capped at four rounds, the client resends the visible
-  transcript (plain role/content pairs, length-capped; tool-call internals are
-  never trusted from the client), and a tighter per-user limiter sits on top
-  of the shared AI limits because one request can drive several model calls
-
-## 📊 Spending Insights
-
-Both `GroupPage` (one group's expenses, broken down by member) and the
-dashboard (your own share of spending across every group you're in, broken
-down by group) share one [`InsightsPanel`](client/src/components/InsightsPanel.jsx)
-component and one [aggregation utility](client/src/utils/insights.js):
-
-- All aggregation (by category, by member/group, by time bucket) happens
-  **client-side** from a flat list already fetched for the page - the data
-  volumes involved (one group's or one person's expenses) are small enough
-  that this is simpler than building server-side grouping queries, and it
-  lets the time-bucket toggle switch **instantly with no refetch**
-- The personal dashboard view is backed by one new endpoint,
-  `GET /api/insights`, which flattens the current user's own expense-split
-  shares across every group they belong to
-- Time buckets (day/week/month, user-selectable) are computed against the
-  **UTC calendar date**, not the viewer's local timezone - otherwise the
-  same expense could land in a different day/week bucket depending on
-  where the viewer is
-- Bars are plain CSS (a `<div>` with a percentage width) rather than a
-  charting library - there was no other charting need in the app to justify
-  the dependency
-- The per-member breakdown always lists every *current* group member, not
-  just the ones with an expense so far - a member added after the fact would
-  otherwise be silently missing until they actually paid for something
-
-## 🔌 Live Updates with WebSockets
-
-Group pages stay current across everyone viewing them via
-[Socket.IO](server/src/services/realtimeService.js), without polling:
-
-- One room per group (`group:<id>`) - a socket only joins after the server
-  confirms the connecting user is actually a member, the same rule the REST
-  API enforces
-- Every mutating endpoint (add/edit/delete an expense, change its category,
-  record a settlement, finalize/reopen, add a member) broadcasts a
-  lightweight `{ type, actorId }` notice to the room after it succeeds - the
-  socket event is a "something changed" signal, not the changed data
-  itself, so there's one source of truth (the REST API) for what's
-  actually current
-- The client refetches the group immediately on receiving this notice, and
-  shows a dismissable banner ("Bob added an expense") alongside it - the
-  refetch is safe to do unprompted because add/edit form fields are their
-  own local state, not derived from the fetched group data, so an
-  in-progress form is never disturbed by it
-- A user's own actions never trigger their own banner (the page already has
-  the fresh data from the API response that caused the change)
-- Auth happens in Socket.IO's handshake middleware (same JWT as the REST
-  API) - a bad or missing token rejects the connection before it's ever
-  established, rather than connecting and then disconnecting
-- `initRealtime()` only runs from `index.js`'s real HTTP server, never
-  under Jest/Supertest - `emitGroupActivity` is a safe no-op in every
-  backend test
-
-## 🔑 Password Reset
-
-`POST /api/auth/forgot-password` and `POST /api/auth/reset-password`
-(implemented in [`authController.js`](server/src/controllers/authController.js),
-emailed via [`emailService.js`](server/src/services/emailService.js) and
-[Resend](https://resend.com)):
-
-- A raw reset token is emailed to the user and **never stored** - only its
-  SHA-256 hash lives in the database, the same reasoning as hashing
-  passwords: a database leak alone shouldn't hand out usable reset links
-- Tokens expire after 1 hour and are single-use (marked spent in the same
-  transaction that updates the password), so a reused or stale link fails
-  with a generic "invalid or expired" error
-- `forgot-password` always returns the same success message whether or not
-  the email is registered - a different response would let anyone use the
-  endpoint to check which emails have accounts
-- If `RESEND_API_KEY` isn't set, the reset link is logged to the console
-  instead of emailed - the endpoint still "succeeds" (no behavioral
-  difference to detect), which is enough for local development without a
-  Resend account
-- Resetting or changing a password bumps the user's `tokenVersion` - see
-  the Security section below for what that actually protects against
+The prompts, the response sanitization, the upload path, and the assistant's
+tool boundary are all in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#-ai-features-cohere).
 
 ## 🔒 Security
 
-A few protections worth calling out explicitly, mostly the product of a
-review once the app was live on a real domain:
+Full detail, including the reasoning behind each one, is in
+[docs/SECURITY.md](docs/SECURITY.md). A few highlights:
 
-- **Group-membership checks on every user id a request supplies, not just
-  the requester** - `paidBy` and each `splits[].userId` on an expense,
-  `toUser` on a settlement, are all separate ids the *request* names, and
-  the database has no constraint tying them to any particular group (they
-  reference the global `User` table). The requester being a group member
-  only proves *they* belong there; without checking these other ids too, an
-  authenticated attacker could create their own group and reference any
-  other registered user - sequential integer ids - as a payer or split
-  participant. [`assertGroupMembers.js`](server/src/utils/assertGroupMembers.js)
-  is the shared check, used by `createExpense`, `updateExpense`, and
-  `createSettlement`.
-- **Group members see name/username only, never email or account-creation
-  date** - [`publicUser.js`](server/src/utils/publicUser.js) has two select
-  shapes: `publicUserSelect` (with email) is only for the authenticated
-  user's own account (`GET/PATCH /api/users/me`); every other nested user -
-  group members, expense payers - uses `groupUserSelect` instead.
-- **Settlements are validated against the actual balance, server-side** -
-  `createSettlement` rejects an amount that's `<= 0`, exceeds what's
-  currently owed, runs in the wrong direction, or names the requester as
-  both parties. Partial settlements (paying off less than the full
-  balance) are allowed. "Currently owed" means the group's *simplified*
-  debts - the same list the group page shows and settles from, computed in
-  one place ([`balanceService.js`](server/src/services/balanceService.js)).
-  It originally checked the direct balance between the two people instead,
-  which disagrees whenever simplification routes a debt through someone
-  else: if Carol owes Bob and Bob owes Alice, the page shows "Carol owes
-  Alice", but directly Carol owes Alice nothing. That broke settling both
-  ways - the server refused payments the page was offering, and accepted
-  ones the page said weren't owed, quietly creating a new debt. Neither
-  case can occur in a two-person group, which is why the browser tests
-  missed it; a three-person integration test now pins both directions.
-- **The session token is unreachable from JavaScript** - it lives in an
-  HttpOnly, SameSite=Lax cookie ([`authCookie.js`](server/src/utils/authCookie.js))
-  rather than `localStorage`, so a script injected into the page can't read
-  it and replay it elsewhere. Worth being precise about the limit: an
-  injected script can still make authenticated requests from the victim's
-  own browser, because the cookie rides along automatically. This narrows
-  the blast radius from "token stolen and reusable anywhere for 7 days" to
-  "abuse confined to the live page" - which is why the CSP below is doing
-  comparable work on the same threat. Two consequences worth knowing: CSRF
-  is handled by `SameSite` (the frontend and API are different origins but
-  the same *site*, so the cookie is sent on the app's own calls and withheld
-  from cross-site ones), and signing out became a real endpoint
-  (`POST /api/auth/logout`), since JavaScript cannot delete a cookie it
-  cannot see.
-- **Sessions can actually be revoked** - JWTs carry a `tokenVersion` claim
-  (`User.tokenVersion` in the schema) checked against the user's current
-  value on every authenticated request, in both `requireAuth`
-  ([`middleware/auth.js`](server/src/middleware/auth.js)) and the Socket.IO
-  handshake ([`realtimeService.js`](server/src/services/realtimeService.js)).
-  Changing or resetting a password increments it, which invalidates every
-  token issued before that point - including one that leaked, which may be
-  exactly why someone's resetting their password - rather than leaving it
-  valid for the rest of its 7-day life. `changePassword` sets a fresh
-  session cookie on its response so the requester's own session survives;
-  anyone else holding an older token doesn't.
-- **Rate limiting, tuned per endpoint kind**
-  ([`rateLimit.js`](server/src/middleware/rateLimit.js)): `signup`/`login`/
-  `forgot-password` are capped at 10 requests/15min/IP (guards against
-  credential stuffing and email enumeration). The Cohere-calling endpoints
-  (expense creation/editing, natural-language parsing) sit behind
-  `requireAuth`, but signup is public and free, so a per-IP limit alone
-  wouldn't stop someone from registering a few accounts and hammering these
-  from one machine anyway - they're limited per-IP *and* per-user on a
-  short window, plus a per-user daily ceiling, to bound Cohere spend/load
-  from a single account spread out over time too.
-- **`app.set("trust proxy", 1)`** in `app.js` - without it, Express sees
-  Caddy's own address on every request (the one reverse-proxying to it in
-  production - see Deploying for real, below), not the real client's,
-  which would turn the per-IP rate limits above into one shared limit for
-  every visitor behind Caddy.
-- **The production build is what actually ships** - AWS deploys
-  `client/Dockerfile.prod` (a real `vite build`, served as static files),
-  never `client/Dockerfile` (Vite's dev server, meant for local iteration
-  only - its own `vite.config.js` has an `allowedHosts: true` setting that
-  says as much). See Deploying for real, below, for the override that
-  makes this happen.
-- **Secrets aren't baked into the EC2 instance's user-data** - Cohere/
-  Resend/JWT/Postgres/ZeroSSL secrets are SecureString parameters in SSM
-  Parameter Store (`aws_ssm_parameter.secrets` in
-  [`terraform/main.tf`](terraform/main.tf)), fetched by the instance
-  itself at boot via a narrowly-scoped IAM policy - not templated
-  directly into the boot script, which is otherwise readable in plaintext
-  by anyone in the AWS account with `ec2:DescribeInstanceAttribute`
-  permission (a wider audience than whoever can read Terraform state).
-  Postgres also no longer uses the `docker-compose.yml` default
-  (`postgres`/`postgres`) - its actual password is generated
-  (`random_password.postgres_password`) the same way `JWT_SECRET` already
-  was.
-- **CI deploys via GitHub OIDC, not a stored AWS key** - see CI/CD, below.
-- **A real Content-Security-Policy on the frontend** - set in Caddy
-  (`terraform/user_data.sh.tpl`), not Helmet, because it's the
-  browser-rendered static build that a CSP actually restricts, not the
-  JSON API's responses. Scoped to what the app actually needs rather than
-  loosened with `*`/`'unsafe-eval'`: `'unsafe-inline'` on `style-src` only
-  (for `InsightsPanel`'s inline chart-bar styles), and an explicit
-  `connect-src` entry for `api.splitfinance.org`'s HTTPS and WebSocket
-  origin, since it's a separate domain from the frontend.
-- **Password-reset URLs never reach production logs** -
-  [`emailService.js`](server/src/services/emailService.js) only prints the
-  raw reset link (which embeds the live token) when
-  `NODE_ENV !== "production"`; the database itself only ever stores the
-  token's SHA-256 hash, never the raw value.
-- **Security events are logged structurally, and escalate on their own** -
-  [`securityLog.js`](server/src/services/securityLog.js) writes one JSON
-  object per line for failed and successful logins, signups, password
-  resets, rejected session cookies, every 403, every 500, AI usage, and any
-  rate limiter tripping. The part that makes it more than a firehose is
-  that repeated events escalate to a `warn` on stderr: one failed login is
-  a typo, five against the same account inside fifteen minutes is worth
-  looking at. Failed logins are keyed by the *account* rather than the
-  source address, because a distributed credential-stuffing run varies
-  where it comes from but not what it is trying to get into; bulk signups
-  are keyed the other way. Where a rate limiter already exists, the warning
-  fires deliberately below it - by the time a limiter trips, the request
-  that was the useful signal has already been discarded. Field names that
-  look like credentials are redacted no matter what a caller passes. In
-  production these lines ship straight to a CloudWatch log group
-  (`aws_cloudwatch_log_group.server_security` in
-  [`terraform/main.tf`](terraform/main.tf), via the Docker `awslogs`
-  logging driver configured in `terraform/user_data.sh.tpl`), authenticated
-  through the instance's own IAM role rather than any embedded credential -
-  `aws logs tail /splitfinance/server --follow` is the live equivalent of
-  the SSH-in-and-`docker compose logs` that used to be the only way to read
-  them, and the history now survives instance replacement instead of
-  resetting with it.
-- **The AI features require a confirmed email address** - signing up is
-  free and instant, which makes throwaway accounts the cheapest route to
-  this project's metered Cohere quota. `POST /api/expenses/parse`, `POST
-  /api/expenses/receipt` and `POST /api/assistant/ask` are gated on
-  `users.email_verified_at`
-  ([`requireVerifiedEmail.js`](server/src/middleware/requireVerifiedEmail.js)),
-  and creating or editing an expense still works but skips its
-  auto-categorization. The scope is deliberate: an unconfirmed account can
-  create groups, add expenses, split them and settle up - everything people
-  actually sign up to do - because none of that costs anything, and putting
-  a mail round-trip in front of the first run would be a real cost against
-  a problem that does not exist there. The confirmation token is 32 random
-  bytes stored only as a SHA-256 hash, single-use, and asking for a fresh
-  link spends the outstanding one.
-- **The assistant can only ever see the caller's own data** - its tools take
-  no user id (each closes over the authenticated session), every group id is
-  membership-checked before a query runs, and every tool is read-only, so a
-  prompt-injection payload in an expense description has nothing to aim at.
-  See Balances & Spending Assistant, above
-- **Receipt uploads are narrow and never persisted** - a size cap, the file
-  type decided from its bytes rather than its name, and no copy kept anywhere,
-  because a receipt photo can carry card digits and a name. See Receipt
-  Scanning, above
-- **Dependencies are audited on a schedule, not just when someone
-  remembers** - [`security.yml`](.github/workflows/security.yml) runs
-  `npm audit` on every change *and* weekly, since "no new commits" is not
-  the same as "no new advisories". It fails on production dependencies at
-  moderate or worse and reports dev-tooling findings without blocking - a
-  split the last real findings argue for, since the one that shipped to
-  browsers (an open redirect in react-router) was rated *moderate* while
-  several criticals were in build-time-only tooling. Dependabot
-  ([`dependabot.yml`](.github/dependabot.yml)) opens the upgrade PRs, which
-  run the full test suite before anyone merges them - monthly, with routine
-  minor/patch updates grouped into one PR per project, and the major
-  versions that were reviewed and declined (React 19, Tailwind 4, eslint 10,
-  Prisma 7, cookie 2) ignored with the reason recorded, so they don't
-  reappear with every patch release. zod 4 was on that list too, until it
-  was taken deliberately (see the Roadmap below). That throttles routine
-  churn only: Dependabot *security* updates are triggered by advisories, not
-  the schedule, and the Dockerfiles use `npm ci` so the tree running in
-  production is the tree that was audited.
-
-## 🏗️ Architecture
-
-```
-splitfinance/
-├── client/                React (Vite) + Tailwind CSS
-├── server/                Node.js + Express + Prisma + PostgreSQL
-├── terraform/             AWS EC2 deployment (alternative to Railway)
-├── .github/workflows/     CI: test on every PR, deploy to AWS on merge
-└── docker-compose.yml
-```
-
-### API Surface
-27 REST endpoints across 8 resources (auth, users, groups, expenses,
-settlements, insights, admin, assistant) - see `server/src/routes/`.
-
-### Tech Stack
-| Layer | Choice |
-|---|---|
-| Frontend | React (Vite), Tailwind CSS, React Router, Axios |
-| Backend | Node.js, Express, Prisma ORM |
-| Database | PostgreSQL |
-| Auth | JWT in an HttpOnly, SameSite=Lax cookie; bcrypt |
-| Email | Resend (password reset links) |
-| Real-time | Socket.IO (live group activity notices) |
-| AI | Cohere (expense auto-categorization, natural-language entry, receipt vision, tool-calling assistant) |
-| Testing | Jest + Supertest (backend), Vitest + React Testing Library (frontend) |
-| Infra | Docker Compose, Caddy (reverse proxy + automatic HTTPS), CloudWatch Logs (security events) |
-| CI/CD | GitHub Actions (lint, unit, integration and Playwright on every PR; auto-deploy to AWS via SSM when a merge touches the app) |
+- Every user id a request supplies - not just the requester's own - is
+  checked against group membership before it's trusted
+- The session lives in an HttpOnly, SameSite=Lax cookie, never
+  `localStorage`; a password change bumps a `tokenVersion` that revokes every
+  earlier session immediately, not just at its natural expiry
+- Settlements are validated server-side against the same simplified debts the
+  UI shows, not a separately-derived balance that can disagree with it
+- Structured security event logging that escalates to a warning on repeated
+  events, shipped to CloudWatch
+- Secrets are fetched from AWS SSM Parameter Store at boot, never baked into
+  the EC2 instance's launch config; CI deploys via GitHub OIDC, no stored AWS
+  key
+- `npm audit` on every change and weekly on a schedule, plus Dependabot
+  upgrade PRs that run the full test suite before anyone merges them
 
 ## 🚀 Getting Started
 
@@ -615,126 +274,29 @@ RESEND_FROM_ADDRESS="SplitFinance <noreply@yourdomain.com>"
 substitution. This root `.env` is git-ignored, same as `server/.env`.
 
 ## 🚢 Deploying for real
-See [DEPLOYMENT.md](DEPLOYMENT.md) for a step-by-step Railway deployment (a
-Postgres database, the API, and the frontend, each from this repo's own
-Dockerfiles). Note that `client/Dockerfile.prod` - not the root
-`client/Dockerfile`, which runs Vite's dev server - is what production
-deploys should build.
 
-Prefer to run it on your own AWS account instead? [`terraform/`](terraform/)
-provisions a single free-tier-eligible EC2 instance that boots, installs
-Docker, clones this repo, and runs `docker compose up --build` - no Railway
-account needed. See the comments in `terraform/main.tf` and
-`terraform/variables.tf` to get started (`terraform init`, `terraform plan
--out=tfplan`, `terraform apply "tfplan"`); `terraform destroy` tears it back
-down. **This is what's actually running the live deploy** at
-https://splitfinance.org.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step Railway and AWS/Terraform
+deployment guides, and the GitHub Actions pipeline that auto-deploys AWS on
+every merge to `main` via SSM (no SSH, no stored AWS key). **This is what's
+actually running the live deploy** at https://splitfinance.org.
 
-A few things the AWS setup adds beyond the bare instance:
-- **The real production build** - unlike local `docker-compose up` (which
-  runs `client/Dockerfile`, Vite's dev server, for fast local iteration),
-  the AWS deploy overrides the client service to build
-  [`client/Dockerfile.prod`](client/Dockerfile.prod) instead: a real
-  `vite build` served as static files by `serve`, on port 4173. Vite's dev
-  server was never meant to be internet-facing (its own `vite.config.js`
-  has an `allowedHosts: true` setting that says so directly) - shipping it
-  to a public URL would have been a real vulnerability.
-- **HTTPS via Caddy** - a Caddy reverse proxy container gets automatic
-  Let's Encrypt certs for `domain_name`/`api_domain_name` (set in
-  `terraform/variables.tf` or `terraform.tfvars`; default
-  `splitfinance.org`/`api.splitfinance.org`) as long as their DNS A
-  records already point at the instance's Elastic IP before it boots.
-  The raw `http://<elastic-ip>:4173` / `:5000` URLs (this repo's
-  `direct_app_url`/`direct_api_url` Terraform outputs) still work as a
-  plaintext debugging fallback, e.g. during DNS cutover - but they're
-  restricted to `allowed_ssh_cidr` in the security group, not open to the
-  public internet, since anyone hitting them directly would be submitting
-  login/signup credentials unencrypted.
-- **A persistent Postgres volume** - database data lives on a separate
-  EBS volume (`aws_ebs_volume.postgres_data`), not the instance's own
-  root disk. This matters because `user_data_replace_on_change = true`
-  means nearly any config change replaces the instance outright, which
-  destroys its root volume - without a separate volume, that would
-  silently wipe every user account on every `terraform apply`. The
-  volume has `prevent_destroy` set, so removing it from config takes a
-  deliberate extra step rather than an accidental `terraform apply`.
-
-### CI/CD
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs four jobs on
-every push/PR to `main` - backend lint and unit tests, the Postgres-backed
-integration suite, frontend lint/tests/build, and the Playwright end-to-end
-suite against a full Docker Compose stack. On a push to `main` that
-actually touches the application, once all four pass, it also redeploys the AWS EC2 instance
-automatically - via AWS Systems Manager, not SSH, since the instance's
-security group intentionally only allows SSH from one trusted IP that a
-GitHub-hosted runner could never match. Authenticates to AWS via GitHub
-OIDC ([`terraform/github_oidc.tf`](terraform/github_oidc.tf)) rather than a
-stored access-key secret - see
-[DEPLOYMENT.md](DEPLOYMENT.md#continuous-deployment-via-github-actions-aws-only)
-for details. Railway's own auto-deploy-on-push (see above) doesn't go
-through this workflow at all.
-
-### Database migrations, and getting back out of one
-
-Migrations used to be forward-only: `prisma migrate deploy` ran as the
-container command and that was the whole story. Two schema migrations
-shipped in a single day made the gap concrete — reverting the application
-code after the integer-cents conversion would have left the database in
-cents while the old code expected dollars, showing every amount 100x too
-large.
-
-**Every migration ships with a `down.sql`**, including the nine that
-predate the convention. There's no allowlist of grandfathered ones: an
-exception list is the thing that grows, and "most migrations can be rolled
-back" isn't a property anyone can lean on at the moment they need it. Each
-one states plainly whether reversing it loses data, because that's what
-decides between reversing the schema and restoring a dump — and it gets
-read under time pressure. Two test layers enforce this: a filesystem check
-in the fast suite, and a database-backed test that applies the whole
-history forward and then reverses all of it. A `down.sql` that has never
-been executed is worse than not having one, because it gets trusted exactly
-when there's no time to check it.
-
-**Failed migrations roll back automatically.**
-[`migrate-and-start.sh`](server/scripts/migrate-and-start.sh) is now the
-container command: it dumps the database, migrates, and restores if the
-migration fails — then exits non-zero, so the server never starts against a
-schema the code doesn't expect. Postgres already rolls back a failed
-migration file on its own, so the real value is elsewhere: a failed
-`migrate deploy` leaves an unfinished row in `_prisma_migrations` that
-blocks *every subsequent deploy* with `P3018` until someone runs
-`migrate resolve` by hand. Restoring the dump clears that too. Dumps are
-only taken when something is actually pending, so ordinary restarts stay
-fast.
-
-**A migration that succeeded and was wrong is a separate, manual
-decision.** By then the app has been writing to the new schema, so whether
-to discard those writes isn't something a script should decide:
-
-```bash
-docker compose exec server ./scripts/rollback-migration.sh --list
-docker compose exec server ./scripts/rollback-migration.sh --down     # reverse the schema, keep the writes
-docker compose exec server ./scripts/rollback-migration.sh --restore   # replay a dump, lose the writes
-```
-
-In production the dumps live on the persistent EBS volume alongside the
-database itself. As an ordinary Docker volume they'd sit on the root disk,
-which is destroyed whenever the instance is replaced — while the database
-survives. The backups would have been the one thing unable to outlive an
-incident.
+Every migration ships with a rollback path, enforced by two test layers - see
+[docs/DATABASE.md](docs/DATABASE.md#migrations) for how that works and how to
+use it.
 
 ## 🧪 Testing
 
-612 tests across three layers, deliberately rather than incidentally: a
-fast mocked layer for logic, a real-database layer for everything mocks
-structurally can't prove, and a browser layer for the flows a user actually
-performs.
+612 tests across three layers - a fast mocked layer for logic, a real-database
+layer for everything mocks structurally can't prove, and a browser layer for
+the flows a user actually performs. What each layer catches (with examples) and
+full setup instructions for integration/e2e are in
+[docs/TESTING.md](docs/TESTING.md).
 
-| Layer | Count | What's real | What's mocked |
-|---|---|---|---|
-| Unit | 525 (302 backend, 223 frontend) | the Express app, React components | Prisma, Cohere, Resend, the socket |
-| Integration | 70 | Postgres, Prisma, migrations, the whole request path | Cohere, Resend only |
-| End-to-end | 17 | everything — real browser, real API, real database | nothing |
+| Layer | Count | What's real |
+|---|---|---|
+| Unit | 525 (302 backend, 223 frontend) | the Express app, React components |
+| Integration | 70 | Postgres, Prisma, migrations, the whole request path |
+| End-to-end | 17 | everything — real browser, real API, real database |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
@@ -742,99 +304,28 @@ cd server && npm test        # 302 (Jest + Supertest, Prisma mocked)
 cd client && npm test        # 223 (Vitest + React Testing Library)
 ```
 
-**Integration** (`server/tests/integration/`) runs the real app against a
-real PostgreSQL, with nothing about the data layer mocked. That's what
-catches the class of bug the unit suite can't see by construction: wrong
-Prisma query shapes, migrations drifting from the schema the code expects,
-integer-cent storage and arithmetic, cascade deletes, unique constraints, and
-balance arithmetic that only means anything against persisted rows. It also
-applies the entire migration history forward and then reverses all of it
-against a scratch database, which is the only thing that makes the down
-migrations trustworthy (see Database migrations, below).
-
-```bash
-docker compose up -d db
-cd server
-createdb splitfinance_test   # or: docker compose exec db createdb -U postgres splitfinance_test
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/splitfinance_test" npm run test:integration:setup
-npm run test:integration     # defaults to that same splitfinance_test database
-```
-
-**End-to-end** (`e2e/`) drives the real UI in Chromium via Playwright —
-signup, login, creating a group, splitting an expense, settling up, search
-and CSV export (a real file download), and the access control on the admin
-page and the AI features. It runs against its own disposable stack
-(`docker-compose.e2e.yml`: separate database, separate ports) so it never
-touches local development data.
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.e2e.yml -p splitfinance-e2e up -d --build
-cd e2e && npm install && npx playwright install chromium
-npm test                     # 17 flows
-npm run screenshots          # regenerates the README images from the live app
-```
-
-## 📁 Data Model
-
-8 tables:
-
-```
-users                  (id, name, username, email, password_hash, token_version, is_admin, created_at)
-groups                 (id, name, created_by, is_finalized, created_at)
-group_members          (group_id, user_id, joined_at)
-expenses               (id, group_id, paid_by, amount¹, description, category, date, created_at)
-expense_splits         (id, expense_id, user_id, amount_owed¹)
-settlements            (id, group_id, from_user, to_user, amount¹, date, created_at)
-password_reset_tokens  (id, user_id, token_hash, expires_at, used_at, created_at)
-email_verification_tokens (id, user_id, token_hash, expires_at, used_at, created_at)
-```
-
-¹ `INTEGER`, holding **cents** rather than dollars — see Money below.
-
-`users.email_verified_at` is `NULL` until the address is confirmed. It gates
-the Cohere-backed features only — see Security.
-
-See `server/prisma/schema.prisma` for the full schema.
-
 ## 💵 Money
 
 Every amount in this app — in the database, over the API, and through every
 calculation — is an **integer number of cents**. `$10.23` is `1023`.
 
-Money was originally `NUMERIC(10,2)` in Postgres but became a JavaScript
-`number` the moment it was read, and binary floating point can't represent
-most decimal fractions exactly (`0.1 + 0.2 === 0.30000000000000004`). That
-had one concrete consequence worth calling out: validating that an expense's
-splits summed to its total needed a tolerance —
+Money used to be a JavaScript `number`, and binary floating point can't
+represent most decimal fractions exactly (`0.1 + 0.2 === 0.30000000000000004`).
+That forced a *tolerance* into the check that an expense's splits summed to its
+total — which meant a split genuinely off by up to a cent passed validation.
+With integers the same check is exact equality:
 
 ```js
 if (Math.abs(splitTotal - data.amount) > 0.01)  // before
-```
-
-— which meant a split that was genuinely off by up to a cent passed
-validation on every expense. With integers the same check is exact:
-
-```js
 if (splitTotal !== data.amount)                 // now
 ```
 
-The tolerances are gone from debt simplification too, where "settled" now
-means exactly zero instead of "within a cent" (which had been quietly
-discarding real one-cent balances).
-
-Dollars survive only at the edges — what someone types, what's rendered, and
-what Cohere returns when it reads a sentence like "Dinner $60". Those cross
-through [`money.js`](server/src/utils/money.js) (mirrored at
-[`client/src/utils/money.js`](client/src/utils/money.js)), which converts via
-*string parsing* rather than `Math.round(value * 100)`, because that
-multiplication is itself lossy: `1.005 * 100` is `100.49999999999999`, which
-rounds to `100` — the wrong cent.
-
 The other thing integers force you to be honest about is remainders. `$60.50`
-three ways is `2016.66…` cents each, which no set of equal whole cents can
-make. `splitEvenly` hands the leftover cents out one at a time, so the parts
-always reconcile against the total exactly rather than relying on a
-correction afterwards that may or may not land.
+three ways is `2016.66…` cents each, which no set of equal whole cents can make
+— `splitEvenly` hands the leftover cents out one at a time, so the parts always
+reconcile against the total exactly.
+
+Full schema and the money-handling code path: [docs/DATABASE.md](docs/DATABASE.md).
 
 ## 🗺️ Roadmap
 
@@ -863,127 +354,7 @@ Nothing queued right now - see Later below.
   currencies
 
 ### Shipped
-- [x] Receipt scanning, stage two: splitting by item - when a scan reads the
-  individual lines, a splitter opens showing each item with a checkbox per
-  person (everyone ticked by default, since "shared" is right more often than
-  a guess) and what each person would owe. Shared items split evenly; tax,
-  tip and service charge are spread in proportion to what each person
-  ordered rather than evenly, so the person with the steak carries more of
-  the tip than the person with the salad. The arithmetic
-  (`receiptSplit.js`) is exact to the cent: it derives the extras as
-  "printed total minus items" rather than trusting a scanned tax line, so
-  the result reconciles to the receipt total even when the scan missed a
-  line, and uses the largest-remainder method (with BigInt for the
-  intermediate products, which overflow a double at the largest amounts) to
-  hand out leftover cents. Applying it fills the ordinary form as an exact
-  split for you to review - it never submits by itself. Line items are
-  best-effort: a receipt that only yields a total behaves as in stage one
-- [x] Receipt scanning, stage one - a "scan a receipt photo" control on the
-  add-expense form uploads a JPEG/PNG/WebP, a Cohere vision model reads the
-  merchant and total, and the form is pre-filled for you to check (it never
-  submits on its own). The first binary input in the app, so the upload path
-  is deliberately narrow: memory storage with a 5MB cap, the file type
-  decided from its leading bytes rather than its name or declared type, and
-  the image is never written to disk or the database - a receipt can carry a
-  card's last digits and a name, and the feature's whole output is two
-  fields, so keeping it would only create something to leak. Gated like the
-  other AI features (confirmed email, rate limits, limiters run before the
-  upload is buffered)
-- [x] A conversational balances/insights assistant - ask "how much did I
-  spend on food this month?" or "who do I owe the most?" in a chat box on
-  the dashboard. A genuine tool-calling agent (`assistantService.js`, the
-  first user of Cohere's v2 chat API in this codebase) rather than a single
-  completion, so the model decides which existing, already-tested service
-  (`getUserBalances`, `getGroupBalances`, the spending aggregation) answers
-  the question rather than being asked to compute anything itself - dollar
-  figures are formatted to strings before the model ever sees them, and it's
-  told to quote them verbatim rather than doing its own arithmetic. Every
-  tool is read-only and none of them take a userId parameter; each closes
-  over the authenticated caller's own id instead, so there's no argument a
-  prompt-injection payload sitting in an expense description could use to
-  ask for someone else's data - a groupId parameter is unavoidable, so
-  every tool that takes one checks membership before running the query, the
-  same boundary the rest of the app enforces at the route level
-- [x] Security logs ship to CloudWatch - the structured JSON events from
-  `securityLog.js` already went to the server container's stdout/stderr;
-  now the Docker `awslogs` logging driver forwards that same output to a
-  dedicated CloudWatch log group (`terraform/main.tf`'s
-  `aws_cloudwatch_log_group.server_security`), authenticated via the
-  instance's own IAM role rather than any embedded credential. "Every
-  failed login for this address in the last hour" is now a query
-  (`aws logs tail /splitfinance/server --follow`, or CloudWatch Logs
-  Insights) instead of an SSH session and `docker compose logs`, and the
-  events outlive instance replacement instead of vanishing with it
-- [x] Search/filter expenses within a group - by description text, category,
-  payer, and an inclusive date range, all combined as AND. Runs entirely
-  client-side (`expenseFilters.js`) since the group page already has every
-  expense loaded; balances and insights are deliberately left unfiltered, so
-  narrowing the list can never make it look like someone owes less than they
-  do
-- [x] CSV export of a group's expenses and settlements - two files rather
-  than one (`csvExport.js`), since folding a settlement's plain two-person
-  transfer into the same rows as an expense's per-member split would mean
-  either inventing an ambiguous sign convention or leaving most cells blank.
-  The expenses file has one column per member showing their own split, so a
-  column total is "what this person was charged" without reconstructing it
-  by hand. Every field is escaped against CSV/spreadsheet formula injection -
-  a description or member name starting with `=`, `+`, `-` or `@` would
-  otherwise execute as a live formula the moment the file is opened in Excel
-  or Sheets
-- [x] Validation messages are worded for people, not zod's defaults -
-  zod 4 renamed `ZodError.errors` to `.issues`, which was silently turning
-  every validation failure into a 500 until `errorHandler.js` was updated.
-  Taking the upgrade properly meant going further: zod's own default
-  messages ("Too small: expected string to have >=8 characters") are written
-  for developers, not the people reading them, and they were reworded
-  wholesale between zod 3 and 4 - so leaving them in place meant a dependency
-  bump could silently rewrite what a user sees on a failed signup. Every
-  user-facing field now goes through `utils/validators.js`, which owns the
-  wording once and stays put across future zod upgrades; an integration test
-  drives a bad request at every validated endpoint and fails if any of
-  zod's own phrasing leaks through
-- [x] WebSocket-based real-time updates
-- [x] Natural-language expense entry - type "Dinner $60, I paid, split with
-  Bob and Charlie" into a text box on the add-expense form and Cohere
-  parses it into `{description, amount, payerId, splitWithIds}`, pre-filling
-  the form for you to confirm (never submits on its own)
-- [x] Choose who an expense splits between when adding it - a "Split
-  between" checkbox list (defaulting to everyone) now applies to every
-  split type, including "equal" - excluding someone no longer requires the
-  exact/percentage workaround of leaving their amount blank
-- [x] Admin dashboard - platform-wide counts (users, groups, expenses,
-  settlements, total money moved) and a recent-signups/recent-groups
-  glance, gated behind a `User.isAdmin` flag
-- [x] Settle up a custom (partial) amount - Settle up opens an amount field
-  pre-filled with the full balance; editing it down records a partial
-  payment. The API had accepted partial payments for a while, but nothing
-  in the UI could send one
-- [x] Per-person balances on the dashboard - what you owe and are owed by
-  each person across all shared groups, netted across groups, with a
-  per-group breakdown since settling still happens one group at a time
-- [x] Move the session off `localStorage` into an HttpOnly cookie - the JWT
-  was readable by any script on the page and replayable for its full 7-day
-  life; it's now an HttpOnly, SameSite=Lax cookie the app can't see. Brought
-  a logout endpoint with it (JavaScript can't delete a cookie it can't read)
-  and a server-side session probe on load, since the client can no longer
-  tell on its own whether it's signed in
-- [x] Automatic rollback for database migrations - every migration now
-  ships with a `down.sql`, the container entrypoint dumps the database
-  before migrating and restores automatically if the migration fails, and
-  `rollback-migration.sh` handles the harder case of a migration that
-  succeeded and was wrong. See "Database migrations" above
-- [x] Email verification - the AI features are gated on a confirmed
-  address, since signing up is free and instant and throwaway accounts were
-  the cheapest route to this project's metered Cohere quota. Everything
-  else stays open to an unconfirmed account
-- [x] Dependency scanning - `npm audit` on every change and weekly on a
-  schedule, plus Dependabot upgrade PRs that run the full test suite
-- [x] Security event logging - structured JSON events that escalate to a
-  warning when the same thing keeps happening from the same source
-- [x] Password reset flow
-- [x] Rate limiting on auth endpoints - `signup`/`login`/`forgot-password`
-  are capped at 10 requests/15min/IP via `express-rate-limit`
-  ([rateLimit.js](server/src/middleware/rateLimit.js))
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for the full history, newest first.
 
 ## 📄 License
 MIT

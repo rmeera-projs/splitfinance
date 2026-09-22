@@ -110,6 +110,50 @@ changes, everything ships automatically. The one exception is
 new frontend build, not just a redeploy of the existing one (Railway does
 this automatically on a redeploy, since a redeploy rebuilds the image).
 
+# Deploying via Terraform (AWS)
+
+An alternative to the Railway steps above: [`terraform/`](terraform/)
+provisions a single free-tier-eligible EC2 instance that boots, installs
+Docker, clones this repo, and runs `docker compose up --build` - no Railway
+account needed. See the comments in `terraform/main.tf` and
+`terraform/variables.tf` to get started (`terraform init`, `terraform plan
+-out=tfplan`, `terraform apply "tfplan"`); `terraform destroy` tears it back
+down. **This is what's actually running the live deploy** at
+https://splitfinance.org.
+
+A few things the AWS setup adds beyond the bare instance:
+- **The real production build** - unlike local `docker-compose up` (which
+  runs `client/Dockerfile`, Vite's dev server, for fast local iteration),
+  the AWS deploy overrides the client service to build
+  [`client/Dockerfile.prod`](client/Dockerfile.prod) instead: a real
+  `vite build` served as static files by `serve`, on port 4173. Vite's dev
+  server was never meant to be internet-facing (its own `vite.config.js`
+  has an `allowedHosts: true` setting that says so directly) - shipping it
+  to a public URL would have been a real vulnerability.
+- **HTTPS via Caddy** - a Caddy reverse proxy container gets automatic
+  Let's Encrypt certs for `domain_name`/`api_domain_name` (set in
+  `terraform/variables.tf` or `terraform.tfvars`; default
+  `splitfinance.org`/`api.splitfinance.org`) as long as their DNS A
+  records already point at the instance's Elastic IP before it boots.
+  The raw `http://<elastic-ip>:4173` / `:5000` URLs (this repo's
+  `direct_app_url`/`direct_api_url` Terraform outputs) still work as a
+  plaintext debugging fallback, e.g. during DNS cutover - but they're
+  restricted to `allowed_ssh_cidr` in the security group, not open to the
+  public internet, since anyone hitting them directly would be submitting
+  login/signup credentials unencrypted.
+- **A persistent Postgres volume** - database data lives on a separate
+  EBS volume (`aws_ebs_volume.postgres_data`), not the instance's own
+  root disk. This matters because `user_data_replace_on_change = true`
+  means nearly any config change replaces the instance outright, which
+  destroys its root volume - without a separate volume, that would
+  silently wipe every user account on every `terraform apply`. The
+  volume has `prevent_destroy` set, so removing it from config takes a
+  deliberate extra step rather than an accidental `terraform apply`.
+
+Rolling back a bad migration in production (`rollback-migration.sh`) is
+covered in [docs/DATABASE.md](docs/DATABASE.md#migrations), since it's the
+same runbook whether the instance was provisioned by Terraform or not.
+
 # Continuous Deployment via GitHub Actions (AWS only)
 
 This section only applies if you're running the [Terraform/AWS](terraform/)

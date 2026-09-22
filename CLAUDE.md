@@ -222,5 +222,9 @@ refuses to dump from a newer server than itself, so that pin moves when the data
 - **Rate limiters skip entirely under `NODE_ENV=test`**; the e2e stack raises the limit via
   `AUTH_RATE_LIMIT_MAX` instead, since it legitimately signs up many accounts from one address.
 - **ESLint 8 with `.eslintrc.json`**, not flat config.
-- Both `README.md` (thorough, user-facing) and `DEPLOYMENT.md` are kept current; update the README when
-  behaviour or test counts change.
+- `README.md` is a short landing page (product, features, the interesting
+  engineering, setup) that links out to `DEPLOYMENT.md` and `docs/`
+  (`ARCHITECTURE.md`, `SECURITY.md`, `TESTING.md`, `DATABASE.md`,
+  `CHANGELOG.md`) for the deep detail. Update the README's counts when they
+  change, and add newly-shipped work to `docs/CHANGELOG.md`, not a growing
+  README section.

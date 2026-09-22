@@ -184,16 +184,10 @@ jobs:
         if: failure()
         run: docker compose -p splitfinance-e2e logs --no-color
 
-  # Decides whether a push can possibly affect the running application.
-  #
-  # Every push to main used to redeploy, which meant a README edit or a
-  # Dependabot config change rebuilt the containers and took the live site
-  # down for half a minute for no reason. That is a real bug rather than an
-  # untidiness, and it caught us out twice in one day.
-  #
-  # Done with plain git and bash rather than a path-filter action on
-  # purpose: this workflow holds the AWS deploy permissions, and it is the
-  # last place worth adding a third-party dependency to.
+  # Decides whether a push can possibly affect the running application - a
+  # README-only push used to redeploy and take the live site down for
+  # nothing. Plain git/bash rather than a path-filter action, since this
+  # workflow holds the AWS deploy permissions.
   changes:
     name: Does this touch the app?
     runs-on: ubuntu-latest
@@ -213,11 +207,9 @@ jobs:
         run: |
           set -u
 
-          # Fail open, always. A new branch, a force push, a rewritten
-          # history, a missing object - every unknown resolves to "deploy".
-          # A skipped deploy that was actually needed leaves production
-          # silently behind the code, which is far worse than an
-          # unnecessary restart.
+          # Fail open: any unknown state (new branch, force push, missing
+          # object) deploys. A skipped deploy that was actually needed is
+          # worse than an unnecessary restart.
           if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]              || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             echo "Cannot work out what changed - deploying to be safe."
             echo "app=true" >> "$GITHUB_OUTPUT"
@@ -237,15 +229,10 @@ jobs:
           while IFS= read -r file; do
             [ -n "$file" ] || continue
             case "$file" in
-              # Read by GitHub, or by people. Never by a container:
-              # e2e/ is not referenced by any Dockerfile or by the base
-              # compose file, and docs/ is only README screenshots.
-              #
-              # .gitattributes is deliberately absent from this list. It
-              # controls line endings at checkout, and the instance deploys
-              # by doing a git reset - a shell script arriving with CRLF
-              # breaks the server image outright, which is exactly the
-              # failure this repo has already hit once.
+              # e2e/ and docs/ are never read by a container. .gitattributes
+              # is deliberately excluded: it controls line endings at
+              # checkout, and a CRLF shell script has broken the server
+              # image before.
               *.md|.github/*|docs/*|e2e/*|.gitignore) ;;
               *) APP=true; break ;;
             esac
