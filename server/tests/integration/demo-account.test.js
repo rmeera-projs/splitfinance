@@ -73,6 +73,30 @@ describe("POST /api/auth/demo", () => {
   });
 });
 
+describe("GET /api/admin/stats excludes demo data", () => {
+  test("a demo sandbox does not inflate totals, recent lists, or the expense/settlement counts", async () => {
+    const admin = await signUp({ name: "Admin" });
+    await prisma.user.update({ where: { id: admin.id }, data: { isAdmin: true } });
+
+    const baseline = await request(app).get("/api/admin/stats").set(admin.auth);
+    expect(baseline.status).toBe(200);
+
+    await request(app).post("/api/auth/demo").send();
+
+    const after = await request(app).get("/api/admin/stats").set(admin.auth);
+
+    // The demo sandbox creates 3 users, 1 group, 5 expenses and 1
+    // settlement - none of it should show up here.
+    expect(after.body.totals.users).toBe(baseline.body.totals.users);
+    expect(after.body.totals.groups).toBe(baseline.body.totals.groups);
+    expect(after.body.totals.expenses).toBe(baseline.body.totals.expenses);
+    expect(after.body.totals.settlements).toBe(baseline.body.totals.settlements);
+    expect(after.body.totalExpenseAmount).toBe(baseline.body.totalExpenseAmount);
+    expect(after.body.recentGroups.some((g) => g.name === "Ski Trip")).toBe(false);
+    expect(after.body.recentUsers.some((u) => u.name === "Demo User")).toBe(false);
+  });
+});
+
 describe("cleanupExpiredDemoAccounts", () => {
   async function backdate(userId, groupId, age) {
     const createdAt = new Date(Date.now() - age);

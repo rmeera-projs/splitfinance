@@ -291,7 +291,7 @@ use it.
 
 ## 🧪 Testing
 
-642 tests across three layers - a fast mocked layer for logic, a real-database
+643 tests across three layers - a fast mocked layer for logic, a real-database
 layer for everything mocks structurally can't prove, and a browser layer for
 the flows a user actually performs. What each layer catches (with examples) and
 full setup instructions for integration/e2e are in
@@ -299,13 +299,13 @@ full setup instructions for integration/e2e are in
 
 | Layer | Count | What's real |
 |---|---|---|
-| Unit | 546 (316 backend, 230 frontend) | the Express app, React components |
-| Integration | 77 | Postgres, Prisma, migrations, the whole request path |
+| Unit | 547 (317 backend, 230 frontend) | the Express app, React components |
+| Integration | 78 | Postgres, Prisma, migrations, the whole request path |
 | End-to-end | 19 | everything — real browser, real API, real database |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 316 (Jest + Supertest, Prisma mocked)
+cd server && npm test        # 317 (Jest + Supertest, Prisma mocked)
 cd client && npm test        # 230 (Vitest + React Testing Library)
 ```
 

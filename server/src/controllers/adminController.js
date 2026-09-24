@@ -7,9 +7,18 @@ const RECENT_LIST_SIZE = 5;
 // is scoped to a group or a specific user, which is exactly why it's
 // gated by requireAdmin rather than the usual group-membership checks
 // the rest of the API uses.
+//
+// Every query below excludes isDemo data. Without that, one click of "Try
+// the demo" (demoSeedService.js) inflates every total by a handful of
+// users/groups/expenses that no real person created, and - worse for a
+// "recent activity" glance - can knock actual recent signups/groups
+// straight off the bottom of a 5-row list. Expense/Settlement have no
+// isDemo column of their own; they're demo-or-not by way of the group
+// they belong to, so those two are scoped through that relation instead.
 async function getStats(req, res, next) {
   try {
     const since = new Date(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const notDemoGroup = { group: { isDemo: false } };
 
     const [
       totalUsers,
@@ -22,19 +31,21 @@ async function getStats(req, res, next) {
       recentUsers,
       recentGroups,
     ] = await Promise.all([
-      prisma.user.count(),
-      prisma.group.count(),
-      prisma.expense.count(),
-      prisma.settlement.count(),
-      prisma.expense.aggregate({ _sum: { amount: true } }),
-      prisma.user.count({ where: { createdAt: { gte: since } } }),
-      prisma.group.count({ where: { createdAt: { gte: since } } }),
+      prisma.user.count({ where: { isDemo: false } }),
+      prisma.group.count({ where: { isDemo: false } }),
+      prisma.expense.count({ where: notDemoGroup }),
+      prisma.settlement.count({ where: notDemoGroup }),
+      prisma.expense.aggregate({ where: notDemoGroup, _sum: { amount: true } }),
+      prisma.user.count({ where: { isDemo: false, createdAt: { gte: since } } }),
+      prisma.group.count({ where: { isDemo: false, createdAt: { gte: since } } }),
       prisma.user.findMany({
+        where: { isDemo: false },
         orderBy: { createdAt: "desc" },
         take: RECENT_LIST_SIZE,
         select: { id: true, name: true, username: true, createdAt: true },
       }),
       prisma.group.findMany({
+        where: { isDemo: false },
         orderBy: { createdAt: "desc" },
         take: RECENT_LIST_SIZE,
         select: {

@@ -55,6 +55,33 @@ describe("GET /api/admin/stats", () => {
     ]);
   });
 
+  // Every query demo data could inflate or crowd out has to exclude it -
+  // one click of "Try the demo" would otherwise count as real growth and
+  // could bump a genuine recent signup off the bottom of the list.
+  test("excludes demo users/groups (and their expenses/settlements) from every query", async () => {
+    prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, isAdmin: true });
+    mockCounts();
+
+    await request(app).get("/api/admin/stats").set(ADMIN_AUTH);
+
+    expect(prisma.user.count).toHaveBeenNthCalledWith(1, { where: { isDemo: false } });
+    expect(prisma.user.count).toHaveBeenNthCalledWith(2, {
+      where: { isDemo: false, createdAt: { gte: expect.any(Date) } },
+    });
+    expect(prisma.group.count).toHaveBeenNthCalledWith(1, { where: { isDemo: false } });
+    expect(prisma.group.count).toHaveBeenNthCalledWith(2, {
+      where: { isDemo: false, createdAt: { gte: expect.any(Date) } },
+    });
+    expect(prisma.expense.count).toHaveBeenCalledWith({ where: { group: { isDemo: false } } });
+    expect(prisma.settlement.count).toHaveBeenCalledWith({ where: { group: { isDemo: false } } });
+    expect(prisma.expense.aggregate).toHaveBeenCalledWith({
+      where: { group: { isDemo: false } },
+      _sum: { amount: true },
+    });
+    expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { isDemo: false } }));
+    expect(prisma.group.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { isDemo: false } }));
+  });
+
   test("rejects a non-admin with 403", async () => {
     prisma.user.findUnique.mockResolvedValue({ tokenVersion: 0, isAdmin: false });
 

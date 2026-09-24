@@ -19,7 +19,11 @@ for what's next.
   sandboxes (`isDemo` on both `User` and `Group`) are swept up lazily on
   the next demo request rather than by a scheduled job, which needs no new
   infrastructure - the trade-off is that a sandbox nobody ever revisits
-  outlives its age by however long it takes for the next visitor to arrive
+  outlives its age by however long it takes for the next visitor to arrive.
+  The admin dashboard's platform-wide counts and recent-activity lists
+  (`adminController.js`) exclude `isDemo` data too - without that, one demo
+  click would count as real growth in the totals, and could knock an
+  actual recent signup off the bottom of a 5-row "recent users" list
 - [x] Receipt scanning, stage two: splitting by item - when a scan reads the
   individual lines, a splitter opens showing each item with a checkbox per
   person (everyone ticked by default, since "shared" is right more often than
