@@ -15,9 +15,12 @@ jest.mock("../services/emailService", () => ({
   sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
 }));
 
+jest.mock("../services/demoSeedService", () => ({ createDemoAccount: jest.fn() }));
+
 const app = require("../app");
 const prisma = require("../config/prisma");
 const { sendPasswordResetEmail } = require("../services/emailService");
+const { createDemoAccount } = require("../services/demoSeedService");
 
 function hashToken(rawToken) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
@@ -127,6 +130,62 @@ describe("POST /api/auth/signup", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/username is taken/i);
     expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/demo", () => {
+  test("creates a sandbox account and starts a session via an HttpOnly cookie", async () => {
+    createDemoAccount.mockResolvedValue({
+      id: 9,
+      name: "Demo User",
+      username: "demo_ab12cd34",
+      email: "demo_ab12cd34@demo.splitfinance.org",
+      passwordHash: "hashed",
+      tokenVersion: 0,
+    });
+
+    const res = await request(app).post("/api/auth/demo").send();
+
+    expect(res.status).toBe(201);
+    expect(res.body.user).toEqual({
+      id: 9,
+      name: "Demo User",
+      username: "demo_ab12cd34",
+      email: "demo_ab12cd34@demo.splitfinance.org",
+      // Deliberately unverified - see demoSeedService.js. A verified demo
+      // account would be a free route around the AI quota gate.
+      emailVerified: false,
+    });
+    // Same contract as signup/login: no token in the body, only the cookie.
+    expect(res.body.token).toBeUndefined();
+
+    const cookie = sessionCookie(res);
+    expect(cookie).not.toBeNull();
+    expect(jwt.verify(cookie.token, process.env.JWT_SECRET)).toMatchObject({ userId: 9, tokenVersion: 0 });
+  });
+
+  test("takes no request body - nothing for a visitor to supply", async () => {
+    createDemoAccount.mockResolvedValue({
+      id: 1,
+      name: "Demo User",
+      username: "demo_1",
+      email: "demo_1@demo.splitfinance.org",
+      passwordHash: "hashed",
+      tokenVersion: 0,
+    });
+
+    await request(app).post("/api/auth/demo").send({ email: "ignored@example.com", password: "ignored" });
+
+    expect(createDemoAccount).toHaveBeenCalledWith();
+  });
+
+  test("propagates a failure from the seed service as a 500 rather than a partial session", async () => {
+    createDemoAccount.mockRejectedValue(new Error("db unavailable"));
+
+    const res = await request(app).post("/api/auth/demo").send();
+
+    expect(res.status).toBe(500);
+    expect(sessionCookie(res)).toBeNull();
   });
 });
 

@@ -61,8 +61,11 @@ review once the app was live on a real domain:
   anyone else holding an older token doesn't.
 - **Rate limiting, tuned per endpoint kind**
   ([`rateLimit.js`](../server/src/middleware/rateLimit.js)): `signup`/`login`/
-  `forgot-password` are capped at 10 requests/15min/IP (guards against
-  credential stuffing and email enumeration). The Cohere-calling endpoints
+  `forgot-password`/`demo` are capped at 10 requests/15min/IP (guards against
+  credential stuffing, email enumeration, and - for `demo` specifically -
+  someone scripting sandbox creation to grow the database; `demo` needs no
+  request body at all, so it would otherwise be the single cheapest write
+  in the API to spam). The Cohere-calling endpoints
   (expense creation/editing, natural-language parsing) sit behind
   `requireAuth`, but signup is public and free, so a per-IP limit alone
   wouldn't stop someone from registering a few accounts and hammering these

@@ -10,10 +10,12 @@ const fields = require("../utils/validators");
 const { presentUser } = require("../utils/publicUser");
 const { sendVerification, hashToken: hashVerificationToken } = require("../services/emailVerificationService");
 const { setAuthCookie, clearAuthCookie } = require("../utils/authCookie");
+const { createDemoAccount } = require("../services/demoSeedService");
 const {
   logLoginFailed,
   logLoginSucceeded,
   logSignup,
+  logDemoAccountCreated,
   logPasswordResetRequested,
   logPasswordResetCompleted,
   logSecurityEvent,
@@ -80,6 +82,21 @@ async function signup(req, res, next) {
     // until they ask for another link.
     await sendVerification(user);
 
+    setAuthCookie(res, user);
+    res.status(201).json({ user: presentUser(user) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// No request body: unlike signup, there is nothing for the visitor to
+// supply. See demoSeedService.js for why this account is not email-verified
+// and why cleanup happens lazily here rather than on a schedule.
+async function demoLogin(req, res, next) {
+  try {
+    const user = await createDemoAccount();
+
+    logDemoAccountCreated(user.id, req.ip);
     setAuthCookie(res, user);
     res.status(201).json({ user: presentUser(user) });
   } catch (err) {
@@ -257,4 +274,13 @@ async function resendVerification(req, res, next) {
   }
 }
 
-module.exports = { signup, login, forgotPassword, resetPassword, logout, verifyEmail, resendVerification };
+module.exports = {
+  signup,
+  login,
+  demoLogin,
+  forgotPassword,
+  resetPassword,
+  logout,
+  verifyEmail,
+  resendVerification,
+};

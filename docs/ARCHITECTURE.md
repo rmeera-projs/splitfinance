@@ -11,7 +11,7 @@ splitfinance/
 ├── .github/workflows/     CI: test on every PR, deploy to AWS on merge
 
 ## API Surface
-27 REST endpoints across 8 resources (auth, users, groups, expenses,
+28 REST endpoints across 8 resources (auth, users, groups, expenses,
 settlements, insights, admin, assistant) - see `server/src/routes/`.
 
 ## Tech Stack

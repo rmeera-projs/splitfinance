@@ -2,6 +2,7 @@ const express = require("express");
 const {
   signup,
   login,
+  demoLogin,
   forgotPassword,
   resetPassword,
   logout,
@@ -18,6 +19,10 @@ const router = express.Router();
 // enough to be worth throttling the way signup/login/forgot-password are.
 router.post("/signup", authRateLimit, signup);
 router.post("/login", authRateLimit, login);
+// Same limiter as signup: creating a demo sandbox is an account creation
+// (server/src/services/demoSeedService.js), just one with even less
+// friction, so it gets at least the same throttling.
+router.post("/demo", authRateLimit, demoLogin);
 router.post("/forgot-password", authRateLimit, forgotPassword);
 router.post("/reset-password", resetPassword);
 // Unauthenticated and unthrottled on purpose - see the comment on logout in

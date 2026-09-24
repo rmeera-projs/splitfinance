@@ -370,3 +370,62 @@ test("exporting a group downloads an expenses CSV and a settlements CSV", async 
   expect(expensesCsv).toContain("60.00");
   expect(expensesCsv).toContain("30.00"); // each member's half of the split
 });
+
+// The one thing only a real browser proves here: that clicking the button
+// actually lands a genuinely new visitor on a dashboard with real, already
+// -there data, not just that the API returns the right shape (that's
+// demo-account.test.js's job, against a real database).
+test("trying the demo drops a fresh visitor straight onto a seeded dashboard", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByRole("button", { name: /try the demo/i }).click();
+
+  await page.waitForURL("/");
+  await expect(page.getByRole("heading", { name: "Hi, Demo User" })).toBeVisible();
+  // .last(): the balances panel above the group list also links to "Ski
+  // Trip" once per outstanding balance, so an unqualified match is
+  // ambiguous once both have loaded. The group card itself is last.
+  await expect(page.getByRole("link", { name: /Ski Trip/ }).last()).toBeVisible();
+
+  await page.getByRole("link", { name: /Ski Trip/ }).last().click();
+  await expect(page.getByText("Cabin rental")).toBeVisible();
+  await expect(page.getByText(/owes/).first()).toBeVisible();
+
+  // Not verified - see demoSeedService.js - so the AI features are gated
+  // exactly like any other fresh account, not specially unlocked.
+  await expect(page.getByText(/confirm your email address to unlock/i)).toBeVisible();
+});
+
+// Two clicks from two independent browser contexts (simulating two visitors
+// arriving around the same time) must not end up sharing a sandbox - each
+// gets its own co-members and its own group, per demoSeedService.js.
+test("two visitors trying the demo at once get independent sandboxes", async ({ browser }) => {
+  const [pageA, pageB] = await Promise.all([
+    browser.newPage().then(async (p) => {
+      await p.goto("/login");
+      return p;
+    }),
+    browser.newPage().then(async (p) => {
+      await p.goto("/login");
+      return p;
+    }),
+  ]);
+
+  await Promise.all([
+    pageA.getByRole("button", { name: /try the demo/i }).click(),
+    pageB.getByRole("button", { name: /try the demo/i }).click(),
+  ]);
+  await Promise.all([pageA.waitForURL("/"), pageB.waitForURL("/")]);
+
+  // .last(): the balances panel above the group list also links to "Ski
+  // Trip" once per outstanding balance (two here - Alex and Jordan both
+  // owe the demo user), so an unqualified match is ambiguous. The group
+  // card itself is the last "Ski Trip" link on the page.
+  await pageA.getByRole("link", { name: /Ski Trip/ }).last().click();
+  await pageB.getByRole("link", { name: /Ski Trip/ }).last().click();
+
+  const memberList = (page) => page.locator("h2", { hasText: "Members" }).locator("+ ul li");
+  const membersA = await memberList(pageA).allTextContents();
+  const membersB = await memberList(pageB).allTextContents();
+  expect(membersA).toHaveLength(3);
+  expect(membersA.sort()).not.toEqual(membersB.sort());
+});

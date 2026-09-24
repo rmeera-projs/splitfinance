@@ -28,6 +28,14 @@ model User {
   /// app, because the abuse this exists to stop is throwaway signups
   /// burning metered AI quota, not people using the product.
   emailVerifiedAt DateTime? @map("email_verified_at")
+  // Set only by demoSeedService.js's "try the demo" flow - a fresh, fully
+  // seeded sandbox account (and, for the synthetic co-members it creates,
+  // an account nobody ever logs into directly). Never set by signup. Scopes
+  // both what a periodic cleanup sweep is allowed to delete and (via
+  // Group.isDemo below) which groups that sweep considers part of the same
+  // sandbox - see demoSeedService.js for why the flag is duplicated onto
+  // Group rather than derived by joining through the owner.
+  isDemo          Boolean   @default(false) @map("is_demo")
   createdAt       DateTime  @default(now()) @map("created_at")
 
   groupsOwned             Group[]                  @relation("GroupOwner")
@@ -79,6 +87,13 @@ model Group {
   name        String
   createdBy   Int      @map("created_by")
   isFinalized Boolean  @default(false) @map("is_finalized")
+  // Set alongside User.isDemo for every group demoSeedService.js creates.
+  // Deliberately its own column rather than something derived from the
+  // owner's isDemo flag: cleanup deletes by a flat WHERE is_demo = true on
+  // each table independently, in dependency order, with no join - easier to
+  // read and audit when the query is the thing standing between "delete
+  // expired demo data" and "delete a real user's data".
+  isDemo      Boolean  @default(false) @map("is_demo")
   createdAt   DateTime @default(now()) @map("created_at")
 
   owner       User          @relation("GroupOwner", fields: [createdBy], references: [id])

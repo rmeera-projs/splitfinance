@@ -7,8 +7,8 @@ Schema, the cents-as-integers rule, and how migrations roll back. See the main [
 8 tables:
 
 ```
-users                  (id, name, username, email, password_hash, token_version, is_admin, created_at)
-groups                 (id, name, created_by, is_finalized, created_at)
+users                  (id, name, username, email, password_hash, token_version, is_admin, is_demo, created_at)
+groups                 (id, name, created_by, is_finalized, is_demo, created_at)
 group_members          (group_id, user_id, joined_at)
 expenses               (id, group_id, paid_by, amount¹, description, category, date, created_at)
 expense_splits         (id, expense_id, user_id, amount_owed¹)

@@ -50,6 +50,14 @@ export function AuthProvider({ children }) {
     setUser(data.user);
   }
 
+  // Same shape as signup, but the server needs nothing from the visitor -
+  // it creates a fresh, already-seeded sandbox account and logs it in with
+  // the same cookie-setting response signup/login use.
+  async function demoLogin() {
+    const { data } = await api.post("/auth/demo");
+    setUser(data.user);
+  }
+
   // Signing out is a server round-trip now: an HttpOnly cookie can't be
   // deleted from JavaScript, so only the API's Set-Cookie can end the
   // session.
@@ -126,6 +134,7 @@ export function AuthProvider({ children }) {
         loading,
         login,
         signup,
+        demoLogin,
         logout,
         forgotPassword,
         resetPassword,

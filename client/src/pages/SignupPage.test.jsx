@@ -53,4 +53,26 @@ describe("SignupPage", () => {
 
     expect(await screen.findByText("That username is taken")).toBeInTheDocument();
   });
+
+  test("the demo button skips the form entirely", async () => {
+    const user = userEvent.setup();
+    const demoLogin = vi.fn().mockResolvedValue();
+    useAuth.mockReturnValue({ signup: vi.fn(), demoLogin });
+
+    renderSignupPage();
+    await user.click(screen.getByRole("button", { name: /try the demo/i }));
+
+    expect(demoLogin).toHaveBeenCalledWith();
+  });
+
+  test("shows the server's message when the demo can't be started", async () => {
+    const user = userEvent.setup();
+    const demoLogin = vi.fn().mockRejectedValue({ response: { data: { error: "Too many attempts - please try again later." } } });
+    useAuth.mockReturnValue({ signup: vi.fn(), demoLogin });
+
+    renderSignupPage();
+    await user.click(screen.getByRole("button", { name: /try the demo/i }));
+
+    expect(await screen.findByText(/too many attempts/i)).toBeInTheDocument();
+  });
 });

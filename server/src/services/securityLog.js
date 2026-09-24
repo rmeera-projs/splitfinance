@@ -159,6 +159,13 @@ function logSignup(userId, email, ip) {
   return logRepeatableEvent("auth.signup", ip, { userId, email, ip }, { threshold: 4, windowMs: FIFTEEN_MINUTES });
 }
 
+// Same shape as logSignup and the same reasoning: a demo sandbox is an
+// account creation with even less friction than signup (no email needed at
+// all), so a burst from one IP is exactly as worth seeing.
+function logDemoAccountCreated(userId, ip) {
+  return logRepeatableEvent("auth.demo_created", ip, { userId, ip }, { threshold: 4, windowMs: FIFTEEN_MINUTES });
+}
+
 function logPasswordResetRequested(email, ip, accountExists) {
   return logRepeatableEvent(
     "auth.password_reset_requested",
@@ -234,6 +241,7 @@ module.exports = {
   logLoginFailed,
   logLoginSucceeded,
   logSignup,
+  logDemoAccountCreated,
   logPasswordResetRequested,
   logPasswordResetCompleted,
   logSessionRejected,

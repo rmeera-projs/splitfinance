@@ -51,7 +51,7 @@ flowchart LR
     GH["GitHub Actions<br/>test · lint · deploy via OIDC"] -.-> EC2
 ```
 
-27 REST endpoints across 8 resources. Full tech stack, package layout, and
+28 REST endpoints across 8 resources. Full tech stack, package layout, and
 subsystem-by-subsystem detail (AI, WebSockets, spending insights, password
 reset) are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -66,6 +66,11 @@ matching section below.
 - **Auth** — signup/login with hashed passwords and a JWT session held in an
   HttpOnly cookie (never readable by page JavaScript); every account has a
   unique username (letters, numbers, underscores) alongside its email
+- **Try the Demo** — one click on the login or signup page drops you into a
+  fresh, already-seeded sandbox account (its own group, members, expenses
+  and a settlement) with no signup required; every visitor gets their own
+  isolated sandbox rather than sharing one, and expired ones are cleaned up
+  automatically
 - **Account Management** — a dedicated Account page (linked from the main
   menu on every page) for updating your name, username, or email, and for
   changing your password (requires the current one)
@@ -286,7 +291,7 @@ use it.
 
 ## 🧪 Testing
 
-612 tests across three layers - a fast mocked layer for logic, a real-database
+642 tests across three layers - a fast mocked layer for logic, a real-database
 layer for everything mocks structurally can't prove, and a browser layer for
 the flows a user actually performs. What each layer catches (with examples) and
 full setup instructions for integration/e2e are in
@@ -294,14 +299,14 @@ full setup instructions for integration/e2e are in
 
 | Layer | Count | What's real |
 |---|---|---|
-| Unit | 525 (302 backend, 223 frontend) | the Express app, React components |
-| Integration | 70 | Postgres, Prisma, migrations, the whole request path |
-| End-to-end | 17 | everything — real browser, real API, real database |
+| Unit | 546 (316 backend, 230 frontend) | the Express app, React components |
+| Integration | 77 | Postgres, Prisma, migrations, the whole request path |
+| End-to-end | 19 | everything — real browser, real API, real database |
 
 ```bash
 # Unit - fast, no Docker, no network. Runs on every save.
-cd server && npm test        # 302 (Jest + Supertest, Prisma mocked)
-cd client && npm test        # 223 (Vitest + React Testing Library)
+cd server && npm test        # 316 (Jest + Supertest, Prisma mocked)
+cd client && npm test        # 230 (Vitest + React Testing Library)
 ```
 
 ## 💵 Money

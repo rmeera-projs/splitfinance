@@ -3,13 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function SignupPage() {
-  const { signup } = useAuth();
+  const { signup, demoLogin } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [demoLoading, setDemoLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -19,6 +20,21 @@ export default function SignupPage() {
       navigate("/");
     } catch (err) {
       setError(err.response?.data?.error || "Signup failed");
+    }
+  }
+
+  // Skips the form entirely - the server creates a fresh, already-seeded
+  // sandbox account and logs it in on the spot (see AuthContext.demoLogin).
+  async function handleDemo() {
+    setError("");
+    setDemoLoading(true);
+    try {
+      await demoLogin();
+      navigate("/");
+    } catch (err) {
+      setError(err.response?.data?.error || "Couldn't start the demo - try again in a moment");
+    } finally {
+      setDemoLoading(false);
     }
   }
 
@@ -61,6 +77,18 @@ export default function SignupPage() {
             Sign up
           </button>
         </div>
+        <div className="flex items-center gap-3 my-4">
+          <div className="flex-1 h-px bg-gray-200" />
+          <span className="text-xs text-gray-400 uppercase">or</span>
+          <div className="flex-1 h-px bg-gray-200" />
+        </div>
+        <button
+          onClick={handleDemo}
+          disabled={demoLoading}
+          className="w-full border border-emerald-600 text-emerald-700 rounded py-2 font-medium hover:bg-emerald-50 disabled:opacity-50"
+        >
+          {demoLoading ? "Setting up your demo…" : "Try the demo - no signup required"}
+        </button>
         <p className="text-sm text-center mt-4">
           Already have an account?{" "}
           <Link to="/login" className="text-emerald-600 font-medium">

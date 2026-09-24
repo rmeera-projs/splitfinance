@@ -1,4 +1,25 @@
-### Shipped
+# Changelog
+
+Everything shipped so far, newest first. See the main [README](../README.md)
+for what's next.
+
+- [x] Try the demo - a "Try the demo" button on the login/signup pages
+  (`POST /api/auth/demo`) creates a fresh, isolated sandbox account on the
+  spot and logs the visitor straight in: its own two co-members, a seeded
+  group, several categorized expenses, and one settlement, so there's
+  something worth looking at immediately. Every visitor gets their own
+  sandbox rather than sharing one fixed login, which sidesteps the usual
+  shared-demo problems (one visitor's changes affecting another's, needing
+  a published password, needing periodic manual reseeding). Deliberately
+  not email-verified - `requireVerifiedEmail.js` exists because signup is
+  already the cheap route to metered Cohere quota, and a demo account is
+  cheaper still (no email needed at all), so pre-verifying it would reopen
+  that hole rather than close it; the seeded expenses are pre-categorized
+  so the categorization feature still has something to show. Expired
+  sandboxes (`isDemo` on both `User` and `Group`) are swept up lazily on
+  the next demo request rather than by a scheduled job, which needs no new
+  infrastructure - the trade-off is that a sandbox nobody ever revisits
+  outlives its age by however long it takes for the next visitor to arrive
 - [x] Receipt scanning, stage two: splitting by item - when a scan reads the
   individual lines, a splitter opens showing each item with a checkbox per
   person (everyone ticked by default, since "shared" is right more often than
