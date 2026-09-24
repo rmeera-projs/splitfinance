@@ -17,6 +17,10 @@ build/
 
 # Claude Code - personal permission overrides, not meant to be shared/committed.
 .claude/settings.local.json
+# Project guidance for Claude Code - kept local rather than public. Claude
+# Code still reads it from the working directory; it just no longer ships
+# with the repo.
+CLAUDE.md
 
 # Terraform - state and generated secrets never belong in git.
 # terraform.lock.hcl (provider version lockfile) is intentionally NOT
