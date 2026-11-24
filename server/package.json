@@ -15,18 +15,18 @@
   "dependencies": {
     "@prisma/client": "^5.19.0",
     "bcrypt": "^6.0.0",
-    "cohere-ai": "^8.1.0",
+    "cohere-ai": "^8.3.1",
     "cookie": "^0.7.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "express-rate-limit": "^8.7.0",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.5",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.4.0",
-    "resend": "^6.28.0",
-    "socket.io": "^4.8.3",
+    "resend": "^6.39.0",
+    "socket.io": "^4.8.4",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -34,7 +34,7 @@
     "jest": "^30.5.1",
     "nodemon": "^3.1.4",
     "prisma": "^5.19.0",
-    "socket.io-client": "^4.8.3",
-    "supertest": "^7.0.0"
+    "socket.io-client": "^4.8.4",
+    "supertest": "^7.3.2"
   }
 }
